@@ -14,6 +14,15 @@ export type SyncData = {
   payload: any;
 };
 
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:stun.nextcloud.com:443' }
+];
+
 export const useMultiplayer = (userName: string, userColor: string) => {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
@@ -76,7 +85,10 @@ export const useMultiplayer = (userName: string, userColor: string) => {
     // Let PeerJS use its best default signaling for the current environment
     const peer = new Peer(newRoomId, {
       debug: 2,
-      // No manual host/port - use default cloud
+      config: {
+        iceServers: ICE_SERVERS,
+        sdpSemantics: 'unified-plan',
+      }
     });
     peerRef.current = peer;
 
@@ -120,13 +132,17 @@ export const useMultiplayer = (userName: string, userColor: string) => {
     setStatus('connecting');
     setErrorDetail(null);
     const peer = new Peer({
-      debug: 2
+      debug: 2,
+      config: {
+        iceServers: ICE_SERVERS,
+        sdpSemantics: 'unified-plan',
+      }
     });
     peerRef.current = peer;
 
     peer.on('open', (id) => {
       const conn = peer.connect(targetRoomId, {
-        reliable: true
+        // reliable: false (default) is better for mobile/NAT traversal
       });
       hostConnRef.current = conn;
       let isConnected = false;
