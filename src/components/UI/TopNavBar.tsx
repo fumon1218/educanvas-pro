@@ -13,6 +13,7 @@ interface TopNavBarProps {
   onGenerate?: (query: string) => void;
   onShare?: () => void;
   onGoHome?: () => void;
+  onOpenMultiplayer?: () => void;
   isGenerating?: boolean;
   isZenMode?: boolean;
   view?: 'home' | 'editor';
@@ -116,6 +117,14 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
 
         {/* Right */}
         <div className="flex items-center gap-3 pointer-events-auto">
+          <button 
+            onClick={onOpenMultiplayer}
+            className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white rounded-full shadow-sm hover:shadow-md hover:bg-green-700 transition-all text-sm font-medium"
+          >
+            <Users size={14} />
+            협업하기
+          </button>
+
           <button 
             onClick={onShare}
             className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-full shadow-sm hover:shadow-md hover:bg-indigo-700 transition-all text-sm font-medium"

@@ -17,6 +17,8 @@ interface WhiteboardProps {
   onCanvasChange?: (canvas: fabric.Canvas) => void;
   onDrawingStateChange?: (isDrawing: boolean) => void;
   activeSceneId?: string;
+  isZenMode?: boolean;
+  multiplayer?: any;
 }
 
 export interface WhiteboardHandle {
@@ -67,6 +69,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   onCanvasChange,
   onDrawingStateChange,
   activeSceneId,
+  multiplayer,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
@@ -116,6 +119,11 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   const [canGroup, setCanGroup] = useState(false);
   const isRestoringRef = useRef(false);
   const isDrawingRef = useRef(false);
+
+  const multiplayerRef = useRef(multiplayer);
+  useEffect(() => {
+    multiplayerRef.current = multiplayer;
+  }, [multiplayer]);
 
   const updateObjectsList = useCallback(() => {
     if (!fabricRef.current || isDrawingRef.current) return;
@@ -986,6 +994,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       isDragging: false,
       lastPosX: 0,
       lastPosY: 0,
+      cursorLastSend: 0,
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1035,6 +1044,27 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         notifyCanvasChange();
         panningState.lastPosX = clientX;
         panningState.lastPosY = clientY;
+      }
+
+      // Multiplayer Live Cursors logic
+      const mp = multiplayerRef.current;
+      if (mp && mp.status === 'connected' && mp.myPeerId) {
+        if (!panningState.cursorLastSend) panningState.cursorLastSend = 0;
+        const now = Date.now();
+        if (now - panningState.cursorLastSend > 50) {
+          panningState.cursorLastSend = now;
+          const pos = canvas.getScenePoint(e);
+          mp.broadcast({
+            type: 'cursor',
+            payload: {
+              id: mp.myPeerId,
+              name: '사용자',
+              x: pos.x,
+              y: pos.y,
+              color: '#3b82f6'
+            }
+          });
+        }
       }
     });
 
@@ -1516,6 +1546,30 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }}
     >
       <canvas ref={canvasRef} />
+      
+      {/* Live Cursors Overlay */}
+      {multiplayer && multiplayer.cursors && Object.values(multiplayer.cursors).map((cursor: any) => {
+        const vpt = fabricRef.current?.viewportTransform || [1, 0, 0, 1, 0, 0];
+        const domX = cursor.x * vpt[0] + vpt[4];
+        const domY = cursor.y * vpt[3] + vpt[5];
+        return (
+          <div 
+            key={cursor.id}
+            className="absolute z-[100] pointer-events-none transition-all duration-75 ease-linear"
+            style={{ transform: `translate(${domX}px, ${domY}px)` }}
+          >
+            <svg className="w-5 h-5 drop-shadow-md" style={{ color: cursor.color }} viewBox="0 0 24 24" fill="currentColor">
+              <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 01.35-.15h6.87a.5.5 0 00.35-.85L6.35 2.85a.5.5 0 00-.85.35z"/>
+            </svg>
+            <div 
+              className="absolute top-5 left-5 text-white text-[10px] px-1.5 py-0.5 rounded-sm whitespace-nowrap shadow-sm font-medium"
+              style={{ backgroundColor: cursor.color }}
+            >
+              {cursor.name}
+            </div>
+          </div>
+        );
+      })}
       
       {/* Floating Action Bar for Selected Objects */}
       {hasSelection && (

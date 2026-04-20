@@ -11,6 +11,8 @@ import { SlideNavigator } from './components/UI/SlideNavigator';
 import { FloatingCamera } from './components/UI/FloatingCamera';
 import { PdfImportModal } from './components/UI/PdfImportModal';
 import { HomeScreen } from './components/UI/HomeScreen';
+import { CollaborationModal } from './components/UI/CollaborationModal';
+import { useMultiplayer } from './hooks/useMultiplayer';
 import { Hand, Heart, ThumbsUp, MessageSquare, Users, Settings, LayoutTemplate } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -54,6 +56,9 @@ export default function App() {
   const lastDrawingEndTimeRef = useRef<number>(0);
   const zenTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const multiplayer = useMultiplayer('Guest', '#3b82f6');
+  const [isCollaborationModalOpen, setIsCollaborationModalOpen] = useState(false);
+
   // Settings State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [canvasBackground, setCanvasBackground] = useState<'blank' | 'grid' | 'dot' | 'dark'>('blank');
@@ -69,6 +74,23 @@ export default function App() {
   // PDF Import State
   const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
   const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    multiplayer.onReceiveData((data) => {
+      if (data.type === 'state') {
+         if (isDrawingRef.current || (Date.now() - lastDrawingEndTimeRef.current < 1000)) return;
+         if (whiteboardRef.current && typeof data.payload === 'string') {
+            whiteboardRef.current.loadFromJSON(data.payload);
+         }
+      }
+      if (data.type === 'sync_request' && multiplayer.isHost) {
+         const currentData = whiteboardRef.current?.toJSON();
+         if (currentData) {
+           multiplayer.broadcast({ type: 'state', payload: currentData });
+         }
+      }
+    });
+  }, [multiplayer]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -552,6 +574,10 @@ export default function App() {
           if (isCollaborating && boardId) {
             syncSceneToFirebase(activeSceneId, currentData);
           }
+          
+          if (multiplayer.roomId) {
+            multiplayer.broadcast({ type: 'state', payload: currentData });
+          }
         });
       };
 
@@ -587,9 +613,16 @@ export default function App() {
         onGenerate={handleGenerate}
         onShare={handleShare}
         onGoHome={() => setView(view === 'home' ? 'editor' : 'home')}
+        onOpenMultiplayer={() => setIsCollaborationModalOpen(true)}
         isGenerating={isGenerating}
         isZenMode={isZenMode}
         view={view}
+      />
+      
+      <CollaborationModal 
+        isOpen={isCollaborationModalOpen}
+        onClose={() => setIsCollaborationModalOpen(false)}
+        multiplayer={multiplayer}
       />
       
       {/* Main Canvas Container */}
@@ -611,6 +644,7 @@ export default function App() {
           activeSceneId={activeSceneId}
           canvasBackground={canvasBackground}
           isZenMode={isZenMode}
+          multiplayer={multiplayer}
         />
       </div>
 
