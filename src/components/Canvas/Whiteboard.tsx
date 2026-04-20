@@ -1142,8 +1142,17 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
     };
 
+    const blockPenHover = (e: any) => {
+      if (e.pointerType === 'pen' && (e.pressure === 0 || e.buttons === 0)) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    };
+
     const touchTarget = containerRef.current;
     if (touchTarget) {
+      touchTarget.addEventListener('pointerdown', blockPenHover, { capture: true, passive: false });
+      touchTarget.addEventListener('pointermove', blockPenHover, { capture: true, passive: false });
       touchTarget.addEventListener('touchstart', handleTouchStart, { passive: false });
       touchTarget.addEventListener('touchmove', handleTouchMove, { passive: false });
       touchTarget.addEventListener('touchend', handleTouchEnd);
