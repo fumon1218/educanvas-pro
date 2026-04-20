@@ -1,0 +1,5 @@
+{
+  "name": "EduCanvas Pro",
+  "description": "Next-gen remote education tool with infinite canvas, scene-based recording, and AI-powered teaching assistance.",
+  "requestFramePermissions": ["camera", "microphone"]
+}

@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "Board": {
+      "title": "Board",
+      "description": "A collaborative whiteboard session.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the board" },
+        "ownerId": { "type": "string", "description": "UID of the user who created the board" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Scene": {
+      "title": "Scene",
+      "description": "A single slide/scene within a board.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "data": { "type": "string", "description": "JSON stringified Fabric.js canvas data" },
+        "order": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["name", "data", "order", "updatedAt", "updatedBy"]
+    }
+  },
+  "firestore": {
+    "/boards/{boardId}": {
+      "schema": { "$ref": "#/entities/Board" },
+      "description": "Stores whiteboard sessions."
+    },
+    "/boards/{boardId}/scenes/{sceneId}": {
+      "schema": { "$ref": "#/entities/Scene" },
+      "description": "Stores individual scenes/slides for a board."
+    }
+  }
+}
