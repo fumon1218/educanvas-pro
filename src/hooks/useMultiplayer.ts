@@ -64,7 +64,11 @@ export const useMultiplayer = (userName: string, userColor: string) => {
     
     // Force peer generation with our custom prefix
     const peer = new Peer(newRoomId, {
-      debug: 1
+      host: '0.peerjs.com',
+      port: 443,
+      secure: true,
+      pingInterval: 5000,
+      debug: 2
     });
     peerRef.current = peer;
 
@@ -101,7 +105,13 @@ export const useMultiplayer = (userName: string, userColor: string) => {
 
   const joinRoom = useCallback((targetRoomId: string) => {
     setStatus('connecting');
-    const peer = new Peer({ debug: 1 });
+    const peer = new Peer({
+      host: '0.peerjs.com',
+      port: 443,
+      secure: true,
+      pingInterval: 5000,
+      debug: 2
+    });
     peerRef.current = peer;
 
     peer.on('open', (id) => {
