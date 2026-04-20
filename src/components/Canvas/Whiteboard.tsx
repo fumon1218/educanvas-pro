@@ -1303,6 +1303,86 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       canvas.requestRenderAll();
     };
 
+    let eraserCircle: fabric.Circle | null = null;
+    let isErasing = false;
+
+    const eraseAtPointer = (e: any) => {
+      if (!eraserCircle) return;
+      const pointerPos = canvas.getScenePoint(e);
+      eraserCircle.set({ left: pointerPos.x, top: pointerPos.y });
+      eraserCircle.setCoords();
+
+      const objects = canvas.getObjects();
+      let removed = false;
+      
+      objects.forEach(obj => {
+         if (obj === eraserCircle) return;
+         if (obj.type === 'path' || obj.type === 'i-text' || obj.type === 'text') {
+            if (obj.intersectsWithObject(eraserCircle) || obj.containsPoint(pointerPos)) {
+               canvas.remove(obj);
+               removed = true;
+            }
+         }
+      });
+      if (removed) {
+         canvas.requestRenderAll();
+         notifyCanvasChange(); // Sync the deletion immediately via WebRTC
+      }
+    };
+
+    const handleEraserDown = (options: any) => {
+      if (tool !== 'eraser') return;
+      isErasing = true;
+      
+      if (!eraserCircle) {
+         eraserCircle = new fabric.Circle({
+            radius: brushSize,
+            fill: 'rgba(220, 220, 220, 0.7)',
+            selectable: false,
+            evented: false,
+            originX: 'center',
+            originY: 'center',
+            stroke: 'rgba(100, 100, 100, 0.8)',
+            strokeWidth: 1,
+         });
+         canvas.add(eraserCircle);
+      }
+      eraseAtPointer(options.e);
+    };
+
+    const handleEraserMove = (options: any) => {
+      if (tool !== 'eraser') return;
+      const pointerPos = canvas.getScenePoint(options.e);
+      
+      if (!eraserCircle) {
+         eraserCircle = new fabric.Circle({
+            radius: brushSize,
+            fill: 'rgba(220, 220, 220, 0.7)',
+            selectable: false,
+            evented: false,
+            originX: 'center',
+            originY: 'center',
+            stroke: 'rgba(100, 100, 100, 0.8)',
+            strokeWidth: 1,
+         });
+         canvas.add(eraserCircle);
+      }
+      
+      eraserCircle.set({ left: pointerPos.x, top: pointerPos.y });
+      canvas.bringObjectToFront(eraserCircle);
+      canvas.requestRenderAll();
+
+      if (isErasing) {
+         eraseAtPointer(options.e);
+      }
+    };
+
+    const handleEraserUp = () => {
+      if (tool !== 'eraser') return;
+      isErasing = false;
+      saveHistory(); // commit deletion to history
+    };
+
     const handleEyedropper = (options: any) => {
       if (tool !== 'eyedropper') return;
       
@@ -1332,6 +1412,13 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       canvas.on('mouse:down', handleLaserDown);
       canvas.on('mouse:move', handleLaserMove);
       canvas.on('mouse:up', handleLaserUp);
+    } else if (tool === 'eraser') {
+      canvas.isDrawingMode = false;
+      canvas.selection = false;
+      canvas.defaultCursor = 'none';
+      canvas.on('mouse:down', handleEraserDown);
+      canvas.on('mouse:move', handleEraserMove);
+      canvas.on('mouse:up', handleEraserUp);
     } else if (tool === 'bucket') {
       canvas.isDrawingMode = false;
       canvas.on('mouse:down', handleBucketFill);
@@ -1356,6 +1443,9 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       canvas.off('mouse:down', handleLaserDown);
       canvas.off('mouse:move', handleLaserMove);
       canvas.off('mouse:up', handleLaserUp);
+      canvas.off('mouse:down', handleEraserDown);
+      canvas.off('mouse:move', handleEraserMove);
+      canvas.off('mouse:up', handleEraserUp);
       canvas.off('mouse:down', handleBucketFill);
       canvas.off('mouse:down', handleEyedropper);
       canvas.selection = false;
@@ -1369,23 +1459,13 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       obj.evented = isSelectionTool;
     });
 
-    canvas.isDrawingMode = tool === 'pen' || tool === 'eraser' || tool === 'pencil' || tool === 'fountain' || tool === 'ballpoint' || tool === 'dashed' || tool === 'highlighter' || tool === 'cut';
+    canvas.isDrawingMode = tool === 'pen' || tool === 'pencil' || tool === 'fountain' || tool === 'ballpoint' || tool === 'dashed' || tool === 'highlighter' || tool === 'cut';
     
     if (canvas.isDrawingMode) {
       const currentBrush = canvas.freeDrawingBrush;
-      const isEraser = tool === 'eraser';
-      
-      if (isEraser) {
-        if (!(currentBrush instanceof fabric.PencilBrush) || currentBrush.color !== '#ffffff' || currentBrush.width !== brushSize * 2) {
-          const brush = new fabric.PencilBrush(canvas);
-          brush.color = '#ffffff';
-          brush.width = brushSize * 2;
-          canvas.freeDrawingBrush = brush;
-        }
-      } else {
-        // Check if we need to create a new brush or if we can just update the current one
-        let needsNewBrush = !(currentBrush instanceof fabric.PencilBrush);
-        let brush = needsNewBrush ? new fabric.PencilBrush(canvas) : (currentBrush as fabric.PencilBrush);
+      // Check if we need to create a new brush or if we can just update the current one
+      let needsNewBrush = !(currentBrush instanceof fabric.PencilBrush);
+      let brush = needsNewBrush ? new fabric.PencilBrush(canvas) : (currentBrush as fabric.PencilBrush);
         
         let targetWidth = brushSize;
         let targetColor = color;
@@ -1424,15 +1504,14 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
             break;
         }
 
-        if (needsNewBrush || brush.color !== targetColor || brush.width !== targetWidth || brush.strokeLineCap !== targetLineCap) {
-          brush.color = targetColor;
-          brush.width = targetWidth;
-          brush.shadow = targetShadow;
-          brush.strokeLineCap = targetLineCap;
-          brush.strokeLineJoin = targetLineJoin;
-          brush.decimate = 1.2; // Balanced for 120Hz iPad input
-          canvas.freeDrawingBrush = brush;
-        }
+      if (needsNewBrush || brush.color !== targetColor || brush.width !== targetWidth || brush.strokeLineCap !== targetLineCap) {
+        brush.color = targetColor;
+        brush.width = targetWidth;
+        brush.shadow = targetShadow;
+        brush.strokeLineCap = targetLineCap;
+        brush.strokeLineJoin = targetLineJoin;
+        brush.decimate = 1.2; // Balanced for 120Hz iPad input
+        canvas.freeDrawingBrush = brush;
       }
     }
 
@@ -1505,12 +1584,14 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     canvas.on('path:created', handlePathCreated);
 
     return () => {
-      if (laserPointer) {
-        canvas.remove(laserPointer);
-      }
+      if (laserPointer) canvas.remove(laserPointer);
+      if (eraserCircle) canvas.remove(eraserCircle);
       canvas.off('mouse:down', handleLaserDown);
       canvas.off('mouse:move', handleLaserMove);
       canvas.off('mouse:up', handleLaserUp);
+      canvas.off('mouse:down', handleEraserDown);
+      canvas.off('mouse:move', handleEraserMove);
+      canvas.off('mouse:up', handleEraserUp);
       canvas.off('mouse:down', handleBucketFill);
       canvas.off('mouse:down', handleEyedropper);
       canvas.off('path:created', handlePathCreated);
