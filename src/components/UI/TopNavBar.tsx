@@ -29,6 +29,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   onGenerate,
   onShare,
   onGoHome,
+  onOpenMultiplayer,
   isGenerating = false,
   isZenMode = false,
   view = 'editor'
