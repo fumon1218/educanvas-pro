@@ -24,8 +24,17 @@ export const useMultiplayer = (userName: string, userColor: string) => {
   const peerRef = useRef<Peer | null>(null);
   const hostConnRef = useRef<DataConnection | null>(null);
   const clientConnsRef = useRef<DataConnection[]>([]);
+  const connTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const onReceiveDataRef = useRef<(data: SyncData) => void>(() => {});
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (connTimeoutRef.current) clearTimeout(connTimeoutRef.current);
+      peerRef.current?.destroy();
+    };
+  }, []);
 
   const broadcast = useCallback((data: SyncData, excludePeerId?: string) => {
     if (isHost) {
@@ -79,8 +88,12 @@ export const useMultiplayer = (userName: string, userColor: string) => {
     });
 
     peer.on('connection', (conn) => {
-      clientConnsRef.current.push(conn);
-      setPeers(prev => [...prev, conn.peer]);
+      conn.on('open', () => {
+        clientConnsRef.current.push(conn);
+        setPeers(prev => [...prev, conn.peer]);
+        
+        // Host should send welcome or initial data if needed, or wait for sync_request
+      });
       
       conn.on('data', (data) => {
         handleData(data as SyncData, conn.peer);
@@ -115,10 +128,24 @@ export const useMultiplayer = (userName: string, userColor: string) => {
     peerRef.current = peer;
 
     peer.on('open', (id) => {
-      const conn = peer.connect(targetRoomId);
+      const conn = peer.connect(targetRoomId, {
+        reliable: true
+      });
       hostConnRef.current = conn;
+      let isConnected = false;
+
+      // Connection timeout
+      connTimeoutRef.current = setTimeout(() => {
+        if (!isConnected) {
+          console.error('PeerJS Connection Timeout');
+          setStatus('error');
+          peer.destroy();
+        }
+      }, 10000);
       
       conn.on('open', () => {
+        isConnected = true;
+        if (connTimeoutRef.current) clearTimeout(connTimeoutRef.current);
         setRoomId(targetRoomId);
         setIsHost(false);
         setStatus('connected');
