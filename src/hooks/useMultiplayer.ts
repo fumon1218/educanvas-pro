@@ -20,6 +20,7 @@ export const useMultiplayer = (userName: string, userColor: string) => {
   const [peers, setPeers] = useState<string[]>([]);
   const [cursors, setCursors] = useState<Record<string, CursorData>>({});
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   
   const peerRef = useRef<Peer | null>(null);
   const hostConnRef = useRef<DataConnection | null>(null);
@@ -72,12 +73,10 @@ export const useMultiplayer = (userName: string, userColor: string) => {
     const newRoomId = 'edu-' + Math.random().toString(36).substr(2, 6);
     
     // Force peer generation with our custom prefix
+    // Let PeerJS use its best default signaling for the current environment
     const peer = new Peer(newRoomId, {
-      host: '0.peerjs.com',
-      port: 443,
-      secure: true,
-      pingInterval: 5000,
-      debug: 2
+      debug: 2,
+      // No manual host/port - use default cloud
     });
     peerRef.current = peer;
 
@@ -112,17 +111,15 @@ export const useMultiplayer = (userName: string, userColor: string) => {
 
     peer.on('error', (err) => {
       console.error('PeerJS Host Error:', err);
+      setErrorDetail(err.type);
       setStatus('error');
     });
   }, [handleData]);
 
   const joinRoom = useCallback((targetRoomId: string) => {
     setStatus('connecting');
+    setErrorDetail(null);
     const peer = new Peer({
-      host: '0.peerjs.com',
-      port: 443,
-      secure: true,
-      pingInterval: 5000,
       debug: 2
     });
     peerRef.current = peer;
@@ -134,14 +131,15 @@ export const useMultiplayer = (userName: string, userColor: string) => {
       hostConnRef.current = conn;
       let isConnected = false;
 
-      // Connection timeout
+      // Connection timeout (Increased to 20s for signaling reliability)
       connTimeoutRef.current = setTimeout(() => {
         if (!isConnected) {
           console.error('PeerJS Connection Timeout');
+          setErrorDetail('timeout');
           setStatus('error');
           peer.destroy();
         }
-      }, 10000);
+      }, 20000);
       
       conn.on('open', () => {
         isConnected = true;
@@ -165,15 +163,18 @@ export const useMultiplayer = (userName: string, userColor: string) => {
 
     peer.on('error', (err) => {
       console.error('PeerJS Client Error:', err);
+      setErrorDetail(err.type);
       setStatus('error');
     });
   }, [handleData]);
 
   const leaveRoom = useCallback(() => {
+    if (connTimeoutRef.current) clearTimeout(connTimeoutRef.current);
     peerRef.current?.destroy();
     setRoomId(null);
     setIsHost(false);
     setStatus('disconnected');
+    setErrorDetail(null);
     setPeers([]);
     setCursors({});
     clientConnsRef.current = [];
@@ -186,6 +187,7 @@ export const useMultiplayer = (userName: string, userColor: string) => {
     peers,
     cursors,
     status,
+    errorDetail,
     createRoom,
     joinRoom,
     leaveRoom,

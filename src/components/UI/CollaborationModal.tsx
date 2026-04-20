@@ -153,7 +153,15 @@ export const CollaborationModal: React.FC<CollaborationModalProps> = ({ isOpen, 
                 </div>
                 <div className="text-center">
                   <h3 className="text-gray-800 font-medium">연결에 실패했습니다</h3>
-                  <p className="text-sm text-gray-500 mt-1">방 코드가 올바른지 확인해주세요.</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {multiplayer.errorDetail === 'peer-unavailable' ? '사용자를 찾을 수 없습니다. 방 코드가 정확한지 확인해 주세요.' : 
+                     multiplayer.errorDetail === 'timeout' ? '연결 시간이 초과되었습니다. 방장의 네트워크 환경을 확인해 주세요.' :
+                     multiplayer.errorDetail === 'network' ? '네트워크 오류가 발생했습니다. 연결 상태를 확인해 주세요.' :
+                     '방 코드가 올바른지 혹은 방장의 연결 상태를 확인해주세요.'}
+                  </p>
+                  {multiplayer.errorDetail && (
+                    <span className="text-[10px] text-gray-400 mt-2 block font-mono">Error: {multiplayer.errorDetail}</span>
+                  )}
                 </div>
                 <button 
                   onClick={multiplayer.leaveRoom}
