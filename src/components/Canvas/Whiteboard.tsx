@@ -1142,10 +1142,32 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
     };
 
+    let lastPenInteractionTime = 0;
+
     const blockPenHover = (e: any) => {
-      if (e.pointerType === 'pen' && (e.pressure === 0 || e.buttons === 0)) {
+      if (e.pointerType === 'pen') {
+        lastPenInteractionTime = Date.now();
+        if (e.pressure === 0 || e.buttons === 0) {
+          e.stopPropagation();
+          e.preventDefault();
+        }
+      } else if (e.pointerType === 'touch' && Date.now() - lastPenInteractionTime < 1500) {
+        // Palm Rejection: Ignore touch pointers for 1.5s after using Apple Pencil
         e.stopPropagation();
-        e.preventDefault();
+      }
+    };
+
+    const blockTouchFromFabric = (e: TouchEvent) => {
+      let hasStylus = false;
+      for (let i = 0; i < e.touches.length; i++) {
+        if ((e.touches[i] as any).touchType === 'stylus') {
+          hasStylus = true;
+          lastPenInteractionTime = Date.now();
+        }
+      }
+      // Palm Rejection: Block single-finger skin touches shortly after Pen usage
+      if (e.touches.length === 1 && !hasStylus && Date.now() - lastPenInteractionTime < 1500) {
+        e.stopPropagation();
       }
     };
 
@@ -1153,6 +1175,9 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     if (touchTarget) {
       touchTarget.addEventListener('pointerdown', blockPenHover, { capture: true, passive: false });
       touchTarget.addEventListener('pointermove', blockPenHover, { capture: true, passive: false });
+      touchTarget.addEventListener('touchstart', blockTouchFromFabric, { capture: true, passive: false });
+      touchTarget.addEventListener('touchmove', blockTouchFromFabric, { capture: true, passive: false });
+      
       touchTarget.addEventListener('touchstart', handleTouchStart, { passive: false });
       touchTarget.addEventListener('touchmove', handleTouchMove, { passive: false });
       touchTarget.addEventListener('touchend', handleTouchEnd);
