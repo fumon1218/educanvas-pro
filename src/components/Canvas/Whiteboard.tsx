@@ -112,8 +112,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   }, [activeSceneId, initialData]);
 
   // History State
-  const [undoStack, setUndoStack] = useState<any[]>([]);
-  const [redoStack, setRedoStack] = useState<any[]>([]);
+  const [undoStack, setUndoStack] = useState<string[]>([]);
+  const [redoStack, setRedoStack] = useState<string[]>([]);
   const [hasSelection, setHasSelection] = useState(false);
   const [isGroupSelected, setIsGroupSelected] = useState(false);
   const [canGroup, setCanGroup] = useState(false);
@@ -146,16 +146,17 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     
     historyTimeoutRef.current = setTimeout(() => {
       if (!fabricRef.current) return;
-      const json = fabricRef.current.toObject(['id', 'isVideo', 'videoElement', 'isAudio', 'audioUrl', 'isWebLink', 'url']);
+      const jsonStr = JSON.stringify(fabricRef.current.toObject(['id', 'isVideo', 'videoElement', 'isAudio', 'audioUrl', 'isWebLink', 'url']));
+      
       setUndoStack((prev) => {
-        if (prev.length > 0 && JSON.stringify(prev[prev.length - 1]) === JSON.stringify(json)) {
+        if (prev.length > 0 && prev[prev.length - 1] === jsonStr) {
           return prev;
         }
-        return [...prev, json];
+        return [...prev, jsonStr];
       });
       setRedoStack([]);
       updateObjectsList();
-    }, 2000); // Increased to 2s to avoid interference during rapid drawing
+    }, 100); // Trigger much faster so undo captures the state
   }, [updateObjectsList]);
 
   const notifyCanvasChange = useCallback(() => {
@@ -300,7 +301,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       setRedoStack((stack) => [...stack, current]);
       setUndoStack((stack) => stack.slice(0, -1));
 
-      fabricRef.current.loadFromJSON(prev).then(() => {
+      // Use string directly if loadFromJSON supports it, or parse it just in case
+      fabricRef.current.loadFromJSON(JSON.parse(prev)).then(() => {
         fabricRef.current?.renderAll();
         isRestoringRef.current = false;
       });
@@ -314,7 +316,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       setUndoStack((stack) => [...stack, next]);
       setRedoStack((stack) => stack.slice(0, -1));
 
-      fabricRef.current.loadFromJSON(next).then(() => {
+      fabricRef.current.loadFromJSON(JSON.parse(next)).then(() => {
         fabricRef.current?.renderAll();
         isRestoringRef.current = false;
       });
