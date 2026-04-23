@@ -301,8 +301,9 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       setRedoStack((stack) => [...stack, current]);
       setUndoStack((stack) => stack.slice(0, -1));
 
-      // Use string directly if loadFromJSON supports it, or parse it just in case
-      fabricRef.current.loadFromJSON(JSON.parse(prev)).then(() => {
+      // Use string directly if loadFromJSON supports it, or parse it if it's a string
+      const parsedPrev = typeof prev === 'string' ? JSON.parse(prev) : prev;
+      fabricRef.current.loadFromJSON(parsedPrev).then(() => {
         fabricRef.current?.renderAll();
         isRestoringRef.current = false;
       });
@@ -316,7 +317,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       setUndoStack((stack) => [...stack, next]);
       setRedoStack((stack) => stack.slice(0, -1));
 
-      fabricRef.current.loadFromJSON(JSON.parse(next)).then(() => {
+      const parsedNext = typeof next === 'string' ? JSON.parse(next) : next;
+      fabricRef.current.loadFromJSON(parsedNext).then(() => {
         fabricRef.current?.renderAll();
         isRestoringRef.current = false;
       });
@@ -429,7 +431,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       const canvas = fabricRef.current;
       if (!canvas) return;
       try {
-        const parsed = JSON.parse(json);
+        const parsed = typeof json === 'string' ? JSON.parse(json) : json;
         canvas.loadFromJSON(parsed).then(() => {
           canvas.renderAll();
           saveHistory();
