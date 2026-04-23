@@ -139,6 +139,70 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const notifyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const handleImagesAdd = useCallback(async (dataUrls: string[]) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    
+    const columns = 4;
+    const padding = 40;
+    const targetWidth = 400;
+    
+    const images = await Promise.all(dataUrls.map(url => {
+      return new Promise<fabric.FabricImage>((resolve) => {
+        fabric.FabricImage.fromURL(url).then(resolve);
+      });
+    }));
+    
+    let currentX = 0;
+    let currentY = 0;
+    let rowHeight = 0;
+    
+    images.forEach((img, index) => {
+      const scale = targetWidth / img.width!;
+      img.scale(scale);
+      
+      const col = index % columns;
+      const row = Math.floor(index / columns);
+      
+      if (col === 0 && row > 0) {
+         currentX = 0;
+         currentY += rowHeight + padding;
+         rowHeight = 0;
+      }
+      
+      img.set({
+        left: currentX,
+        top: currentY,
+        cornerColor: '#3b82f6',
+        cornerSize: 10,
+        transparentCorners: false,
+      });
+      
+      currentX += img.getScaledWidth() + padding;
+      rowHeight = Math.max(rowHeight, img.getScaledHeight());
+    });
+    
+    const totalWidth = Math.min(images.length, columns) * targetWidth + (Math.min(images.length, columns) - 1) * padding;
+    const totalHeight = currentY + rowHeight;
+    
+    const startX = (canvas.width! - totalWidth) / 2;
+    const startY = (canvas.height! - totalHeight) / 2;
+    
+    images.forEach(img => {
+      img.set({
+        left: img.left! + startX,
+        top: img.top! + startY
+      });
+      canvas.add(img);
+    });
+    
+    if (images.length > 0) {
+      const sel = new fabric.ActiveSelection(images, { canvas });
+      canvas.setActiveObject(sel);
+      canvas.requestRenderAll();
+    }
+  }, []);
+
   const saveHistory = useCallback(() => {
     if (isRestoringRef.current || !fabricRef.current || isDrawingRef.current) return;
     
@@ -601,7 +665,39 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         (group as any).audioUrl = audioUrl;
         canvas.add(group);
         canvas.setActiveObject(group);
-      } else if (fileName.endsWith('.pptx') || fileName.endsWith('.ppt') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      } else if (fileName.endsWith('.pptx')) {
+        try {
+          // Dynamic import JSZip from CDN
+          const JSZipModule: any = await import('https://esm.sh/jszip');
+          const JSZip = JSZipModule.default;
+          const zip = await JSZip.loadAsync(file);
+          const mediaFolder = zip.folder("ppt/media");
+          
+          if (mediaFolder) {
+            const imageFiles = Object.keys(mediaFolder.files).filter(name => 
+              name.toLowerCase().match(/\.(jpg|jpeg|png|gif|emf|wmf)$/i)
+            );
+            
+            if (imageFiles.length > 0) {
+              const dataUrls = await Promise.all(imageFiles.map(async name => {
+                const fileData = mediaFolder.file(name);
+                if (!fileData) return "";
+                const blob = await fileData.async("blob");
+                return URL.createObjectURL(blob);
+              }));
+              
+              const validUrls = dataUrls.filter(url => url !== "");
+              if (validUrls.length > 0) {
+                handleImagesAdd(validUrls);
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error extracting images from PPTX:", err);
+        }
+
+        // Fallback if extraction fails
         const group = new fabric.Group([
           new fabric.Rect({
             width: 120,
@@ -623,7 +719,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
             top: 80,
             fill: '#666',
           }),
-          new fabric.IText('Convert to PDF for full view', {
+          new fabric.IText('Images not found. Convert to PDF.', {
             fontSize: 8,
             left: 10,
             top: 100,
@@ -638,69 +734,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
       canvas.requestRenderAll();
     },
-    addImages: async (dataUrls: string[]) => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      
-      const columns = 4;
-      const padding = 40;
-      const targetWidth = 400;
-      
-      const images = await Promise.all(dataUrls.map(url => {
-        return new Promise<fabric.FabricImage>((resolve) => {
-          fabric.FabricImage.fromURL(url).then(resolve);
-        });
-      }));
-      
-      let currentX = 0;
-      let currentY = 0;
-      let rowHeight = 0;
-      
-      images.forEach((img, index) => {
-        const scale = targetWidth / img.width!;
-        img.scale(scale);
-        
-        const col = index % columns;
-        const row = Math.floor(index / columns);
-        
-        if (col === 0 && row > 0) {
-           currentX = 0;
-           currentY += rowHeight + padding;
-           rowHeight = 0;
-        }
-        
-        img.set({
-          left: currentX,
-          top: currentY,
-          cornerColor: '#3b82f6',
-          cornerSize: 10,
-          transparentCorners: false,
-        });
-        
-        currentX += img.getScaledWidth() + padding;
-        rowHeight = Math.max(rowHeight, img.getScaledHeight());
-      });
-      
-      const totalWidth = Math.min(images.length, columns) * targetWidth + (Math.min(images.length, columns) - 1) * padding;
-      const totalHeight = currentY + rowHeight;
-      
-      const startX = (canvas.width! - totalWidth) / 2;
-      const startY = (canvas.height! - totalHeight) / 2;
-      
-      images.forEach(img => {
-        img.set({
-          left: img.left! + startX,
-          top: img.top! + startY
-        });
-        canvas.add(img);
-      });
-      
-      if (images.length > 0) {
-        const sel = new fabric.ActiveSelection(images, { canvas });
-        canvas.setActiveObject(sel);
-        canvas.requestRenderAll();
-      }
-    },
+    addImages: (dataUrls: string[]) => handleImagesAdd(dataUrls),
     addWebLink: (url) => {
       const canvas = fabricRef.current;
       if (!canvas) return;
