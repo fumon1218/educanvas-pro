@@ -21,7 +21,7 @@ export const fmtTime = (sec?: number) => {
 };
 export const clipLabel = (c?: Clip) => (c && (c.start != null || c.end != null) ? `${fmtTime(c.start ?? 0)} ~ ${c.end != null ? fmtTime(c.end) : '끝'}` : '');
 
-export function toEmbeddableUrl(raw: string, clip?: Clip): { url: string; kind: 'youtube' | 'vimeo' | 'google' | 'web' } | null {
+export function toEmbeddableUrl(raw: string, clip?: Clip): { url: string; kind: 'youtube' | 'youtube-home' | 'vimeo' | 'google' | 'web' } | null {
   const safe = sanitizeUrl(raw);
   if (!safe) return null;
   const u = new URL(safe);
@@ -46,6 +46,8 @@ export function toEmbeddableUrl(raw: string, clip?: Clip): { url: string; kind: 
     if (m) return yt(m[2]);
     const list = u.searchParams.get('list');
     if (list) return { url: `https://www.youtube-nocookie.com/embed/videoseries?list=${encodeURIComponent(list)}`, kind: 'youtube' };
+    // 첫 화면·검색·채널 페이지는 유튜브가 다른 앱 안에서 열리지 못하게 막아 둔다 → 영상 고르기 안내
+    return { url: safe, kind: 'youtube-home' };
   }
   if (host === 'youtu.be') {
     const id = u.pathname.slice(1).split('/')[0];
@@ -62,6 +64,40 @@ export function toEmbeddableUrl(raw: string, clip?: Clip): { url: string; kind: 
   }
   return { url: safe, kind: 'web' };
 }
+
+/** 유튜브 첫 화면은 창 안에 열 수 없으므로: 새 탭에서 찾고 → 영상 주소를 붙여 넣게 돕는다 */
+const YouTubeHelper: React.FC<{ initial: string; onPaste: (url: string) => void }> = ({ initial, onPaste }) => {
+  const [q, setQ] = useState(initial);
+  const [msg, setMsg] = useState<string | null>(null);
+  const pasteFromClipboard = async () => {
+    try {
+      const t = (await navigator.clipboard.readText()).trim();
+      const r = t ? toEmbeddableUrl(t) : null;
+      if (r && r.kind === 'youtube') onPaste(t);
+      else setMsg('복사한 내용이 유튜브 영상 주소가 아닙니다. 영상 화면에서 [공유] → [복사]를 눌러 주세요.');
+    } catch {
+      setMsg('붙여 넣기를 허락하지 않았습니다. 위 주소 칸에 영상 주소를 붙여 넣고(Ctrl/⌘+V) Enter를 눌러 주세요.');
+    }
+  };
+  return (
+    <div className="absolute inset-0 overflow-y-auto flex flex-col items-center justify-center gap-4 p-6 text-center">
+      <div className="w-12 h-12 rounded-2xl bg-red-600 text-white flex items-center justify-center text-xl">▶</div>
+      <div>
+        <div className="text-[15px] font-bold text-slate-800">유튜브는 영상 하나씩 열 수 있어요</div>
+        <p className="mt-1 text-[12px] text-slate-500 leading-relaxed">유튜브 첫 화면·검색 화면은 유튜브가 다른 앱 안에서 열리지 못하게 막아 두었습니다.<br />새 탭에서 영상을 찾아 <b>[공유] → [복사]</b>한 뒤 돌아오면 이 창에서 바로 재생됩니다.</p>
+      </div>
+      <form
+        onSubmit={e => { e.preventDefault(); window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(q.trim())}`, '_blank', 'noopener'); }}
+        className="w-full max-w-sm flex gap-1.5"
+      >
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="찾을 영상 (예: 광합성 실험)" className="flex-1 min-w-0 h-10 px-3 rounded-xl bg-slate-100 text-[13px] outline-none focus:bg-white focus:ring-2 focus:ring-red-200" aria-label="유튜브에서 찾을 말" />
+        <button type="submit" className="h-10 px-3 rounded-xl bg-red-600 text-white text-[13px] font-semibold whitespace-nowrap">유튜브에서 찾기 ↗</button>
+      </form>
+      <button onClick={pasteFromClipboard} className="h-10 px-4 rounded-xl bg-slate-900 text-white text-[13px] font-semibold">복사한 영상 주소 붙여 넣기</button>
+      {msg && <p className="text-[12px] text-red-500 max-w-sm" role="alert">{msg}</p>}
+    </div>
+  );
+};
 
 interface Props {
   initialUrl?: string;
@@ -86,8 +122,19 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  const [ytSearch, setYtSearch] = useState<string | null>(null);
   const go = (raw: string, withClip: Clip | undefined = clip) => {
+    // 주소가 아닌 낱말은 유튜브 검색어로 본다
+    if (raw.trim() && !/[.:/]/.test(raw.trim())) { setCurrent(null); setError(null); setYtSearch(raw.trim()); return; }
     const r = toEmbeddableUrl(raw, withClip);
+    if (r?.kind === 'youtube-home') {
+      const u = new URL(r.url);
+      setCurrent(null); setError(null);
+      setYtSearch(u.searchParams.get('search_query') || '');
+      onTitle?.('유튜브');
+      return;
+    }
+    setYtSearch(null);
     if (!r || !/[.:]/.test(raw)) {
       setError('웹 주소를 넣어 주세요. 유튜브 영상은 주소를 복사해 붙여 넣으면 바로 재생됩니다.');
       return;
@@ -132,7 +179,7 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
         <input
           value={input}
           onChange={e => setInput(e.target.value)}
-          placeholder="웹 주소 또는 유튜브 영상 주소를 붙여 넣으세요"
+          placeholder="웹 주소, 유튜브 영상 주소 또는 찾을 말"
           className="flex-1 min-w-0 px-3 py-1.5 rounded-lg bg-slate-100 text-[13px] text-slate-800 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-200"
           aria-label="웹 주소"
           onFocus={e => e.currentTarget.select()}
@@ -173,7 +220,12 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
             {clipError && <span className="text-red-500 w-full">{clipError}</span>}
           </div>
         )}
-        {current ? (
+        {ytSearch !== null && !current ? (
+          <YouTubeHelper
+            initial={ytSearch}
+            onPaste={url => go(url)}
+          />
+        ) : current ? (
           <iframe
             key={`${current.url}-${reloadKey}`}
             src={current.url}
