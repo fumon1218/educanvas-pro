@@ -16,7 +16,8 @@ export type ToolType =
   | 'pen' | 'eraser' | 'laser' | 'select' | 'lasso' | 'pencil' | 'fountain' | 'ballpoint'
   | 'dashed' | 'bucket' | 'highlighter' | 'pan' | 'eyedropper';
 
-export type CanvasBackground = 'blank' | 'grid' | 'dot' | 'dark';
+import { drawBackground, isDarkBackground, backgroundColor, type CanvasBackground } from '@/src/lib/backgrounds';
+export type { CanvasBackground } from '@/src/lib/backgrounds';
 
 export type MediaSelection = {
   type: 'video' | 'audio' | 'weblink' | 'model' | 'score' | 'none';
@@ -25,7 +26,12 @@ export type MediaSelection = {
   modelId?: string;
   name?: string;
   scoreData?: string;
+  scoreKey?: string;
   objectId?: string;
+  /** 웹 링크 카드의 재생 구간 (초) */
+  clipStart?: number;
+  clipEnd?: number;
+  driveId?: string;
 };
 
 export interface CanvasChangeInfo {
@@ -55,6 +61,10 @@ interface WhiteboardProps {
   onCanvasChange?: (info: CanvasChangeInfo) => void;
   onSelectionChange?: (selection: MediaSelection) => void;
   onZoomChange?: (zoom: number) => void;
+  /** 레이저 포인터 위치 (판서 좌표) — 학생 화면으로 보낼 때 */
+  onLaser?: (x: number, y: number) => void;
+  /** 화면을 옮기거나 확대했을 때 */
+  onViewChange?: () => void;
   onColorPicked?: (color: string) => void;
   onDrawingStateChange?: (isDrawing: boolean) => void;
   onRequestTool?: (tool: ToolType) => void;
@@ -71,18 +81,22 @@ export interface WhiteboardHandle {
   addText: (text?: string, options?: { width?: number }) => void;
   addFile: (file: File) => Promise<void>;
   addImages: (dataUrls: string[]) => Promise<void>;
-  addWebLink: (url: string) => void;
+  addWebLink: (url: string, clip?: { start?: number; end?: number }) => void;
   addShape: (type: 'rect' | 'circle' | 'ellipse' | 'triangle' | 'polygon' | 'line' | 'arrow') => void;
   /** ink: 잠긴 객체·PDF 배경은 남기고 판서만 지움 / all: 모두 지움 */
   clear: (mode?: 'ink' | 'all') => void;
   hasLockedContent: () => boolean;
   fitToContent: () => void;
+  /** 한 슬라이드에 이어 붙인 PDF 쪽을 넘긴다. 더 넘길 쪽이 없으면 false */
+  stepPage: (dir: 1 | -1) => boolean;
   getLaserCanvas: () => HTMLCanvasElement | null;
   /** 녹화용: [판서 캔버스, 그리는 중인 선 캔버스, 레이저 캔버스] */
   getRecordLayers: () => (HTMLCanvasElement | null)[];
   getContainer: () => HTMLDivElement | null;
-  addModelCard: (asset: { id: string; name: string; thumb?: string }) => Promise<void>;
-  addScore: (svg: string, scoreData: string, title: string) => Promise<void>;
+  addModelCard: (asset: { id: string; name: string; thumb?: string; driveId?: string }) => Promise<void>;
+  addScore: (svg: string, scoreData: string, title: string, extra?: { scoreKey?: string; scoreBoxes?: string }) => Promise<void>;
+  /** 연주 중인 마디를 표시한다. 이 슬라이드에 그 마디가 없으면 false. key가 null이면 표시를 지운다 */
+  highlightScore: (key: string | null, measure: number) => boolean;
   addImageDataUrl: (dataUrl: string) => Promise<void>;
   undo: () => void;
   redo: () => void;
@@ -156,15 +170,18 @@ function selectionOf(target: any): MediaSelection {
   if (!target) return { type: 'none' };
   if (target.isVideo) return { type: 'video', element: target.getElement() };
   if (target.isAudio) return { type: 'audio', url: target.audioUrl };
-  if (target.isWebLink) return { type: 'weblink', url: target.url };
-  if (target.isModel) return { type: 'model', modelId: target.modelId, name: target.modelName };
-  if (target.isScore) return { type: 'score', scoreData: target.scoreData, name: target.scoreTitle, objectId: target.id };
+  if (target.isWebLink) return { type: 'weblink', url: target.url, clipStart: target.clipStart, clipEnd: target.clipEnd };
+  if (target.isModel) return { type: 'model', modelId: target.modelId, name: target.modelName, driveId: target.driveId };
+  if (target.isScore) return { type: 'score', scoreData: target.scoreData, name: target.scoreTitle, objectId: target.id, scoreKey: target.scoreKey || target.id };
   return { type: 'none' };
 }
 
 function isLocked(obj: fabric.FabricObject) {
   return !!(obj as any).locked;
 }
+
+/** 좌표평면의 원점: 처음 화면(100%)의 가운데 */
+export const coordOrigin = (canvas: { width: number; height: number }) => ({ x: Math.round(canvas.width / 2 / 40) * 40, y: Math.round(canvas.height / 2 / 40) * 40 });
 
 function isHelper(obj: fabric.FabricObject | undefined) {
   return !!obj && !!obj.excludeFromExport;
@@ -217,12 +234,32 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
 
   const getCanvas = useCallback(() => fabricRef.current, []);
 
+  // ---------- 배경 (수업 템플릿 무늬) ----------
+  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+  const scoreHlRef = useRef<fabric.Rect | null>(null);
+  const bgKeyRef = useRef('');
+  const paintBackground = useCallback(() => {
+    const el = bgCanvasRef.current, canvas = fabricRef.current, box = containerRef.current;
+    if (!el || !canvas || !box) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = box.clientWidth, h = box.clientHeight;
+    const v = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
+    const key = [backgroundRef.current, w, h, dpr, v[0], v[4], v[5]].join('|');
+    if (key === bgKeyRef.current) return;
+    bgKeyRef.current = key;
+    if (el.width !== Math.round(w * dpr) || el.height !== Math.round(h * dpr)) { el.width = Math.round(w * dpr); el.height = Math.round(h * dpr); }
+    const ctx = el.getContext('2d');
+    if (!ctx) return;
+    drawBackground(ctx, backgroundRef.current, el.width, el.height, v as number[], dpr, coordOrigin(canvas));
+  }, []);
+
   // ---------- 배경 ----------
   const applyBackground = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    canvas.backgroundColor = backgroundRef.current === 'dark' ? '#1a202c' : 'transparent';
+    canvas.backgroundColor = 'transparent';
     canvas.requestRenderAll();
+    paintBackground();
   }, []);
 
   // ---------- 도구 상태 (선택 가능 여부 등) ----------
@@ -415,14 +452,59 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     const x = (e.clientX ?? e.touches?.[0]?.clientX ?? 0) - rect.left;
     const y = (e.clientY ?? e.touches?.[0]?.clientY ?? 0) - rect.top;
     laserPointsRef.current.push({ x, y, t: performance.now() });
+    const v = fabricRef.current?.viewportTransform;
+    if (v && propsRef.current.onLaser) propsRef.current.onLaser((x - v[4]) / v[0], (y - v[5]) / v[3]);
     if (laserPointsRef.current.length > 120) laserPointsRef.current.shift();
     if (laserAnimRef.current == null) laserAnimRef.current = requestAnimationFrame(drawLaser);
   }, [drawLaser]);
+
+  // ---------- 이어 붙인 PDF 쪽 ----------
+  const stackedPages = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return [];
+    return canvas.getObjects().filter(o => (o as any).pageNo != null && o.visible !== false).sort((a, b) => a.getBoundingRect().top - b.getBoundingRect().top);
+  }, []);
+  const fitRect = useCallback((r: { left: number; top: number; width: number; height: number }, pad = 16) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const zoom = Math.min(3, Math.max(0.05, Math.min((canvas.width - pad * 2) / r.width, (canvas.height - pad * 2) / r.height)));
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    canvas.setViewportTransform([zoom, 0, 0, zoom, canvas.width / 2 - cx * zoom, canvas.height / 2 - cy * zoom]);
+    canvas.requestRenderAll();
+    propsRef.current.onZoomChange?.(zoom);
+    forceRender(n => n + 1);
+  }, []);
+  /** 지금 화면 가운데에 있는 쪽 번호(배열 위치) */
+  const currentPageIndex = useCallback((pages: fabric.FabricObject[]) => {
+    const canvas = fabricRef.current;
+    if (!canvas || !pages.length) return -1;
+    const v = canvas.viewportTransform;
+    const cy = (canvas.height / 2 - v[5]) / v[3];
+    let best = 0, bestD = Infinity;
+    pages.forEach((p, i) => {
+      const r = p.getBoundingRect();
+      const d = cy < r.top ? r.top - cy : cy > r.top + r.height ? cy - r.top - r.height : 0;
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return best;
+  }, []);
+  const stepPage = useCallback((dir: 1 | -1) => {
+    const pages = stackedPages();
+    if (pages.length < 2) return false;
+    const i = currentPageIndex(pages);
+    const j = i + dir;
+    if (j < 0 || j >= pages.length) return false;
+    fitRect(pages[j].getBoundingRect());
+    return true;
+  }, [stackedPages, currentPageIndex, fitRect]);
 
   // ---------- 내용 전체가 화면에 들어오도록 맞추기 ----------
   const fitToContent = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
+    // 여러 쪽을 이어 붙인 슬라이드는 지금 보고 있는 쪽 하나를 맞춘다
+    const pages = stackedPages();
+    if (pages.length > 1) { fitRect(pages[Math.max(0, currentPageIndex(pages))].getBoundingRect()); return; }
     const objs = canvas.getObjects().filter(o => !isHelper(o) && o.visible !== false);
     if (objs.length === 0) {
       canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
@@ -626,7 +708,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     },
     addText: (text = '내용을 입력하세요', options: { width?: number } = {}) => {
       const t = options.width
-        ? new fabric.Textbox(text, { width: options.width, fontFamily: KOREAN_FONT, fontSize: 22, fill: backgroundRef.current === 'dark' ? '#ffffff' : colorRef.current, cornerColor: '#3b82f6' })
+        ? new fabric.Textbox(text, { width: options.width, fontFamily: KOREAN_FONT, fontSize: 22, fill: isDarkBackground(backgroundRef.current) ? '#ffffff' : colorRef.current, cornerColor: '#3b82f6' })
         : new fabric.IText(text, { fontFamily: KOREAN_FONT, fontSize: Math.max(20, brushSizeRef.current * 6), fill: colorRef.current, cornerColor: '#3b82f6' });
       placeAtCenter(t);
       addAndSelect(t);
@@ -693,16 +775,23 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
     },
     addImages: handleImagesAdd,
-    addWebLink: (url: string) => {
-      const display = url.length > 32 ? url.slice(0, 31) + '…' : url;
+    addWebLink: (url: string, clip?: { start?: number; end?: number }) => {
+      const display = url.length > 34 ? url.slice(0, 33) + '…' : url;
+      const isYt = /(^|\.)(youtube\.com|youtu\.be)$/i.test((() => { try { return new URL(url).hostname; } catch { return ''; } })());
+      const hasClip = !!clip && (clip.start != null || clip.end != null);
+      const t = (n?: number) => (n == null ? '' : `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, '0')}`);
+      const accent = isYt ? '#dc2626' : '#10b981';
+      const head = isYt ? (hasClip ? `▶ 유튜브 구간 ${t(clip!.start ?? 0)} ~ ${clip!.end != null ? t(clip!.end) : '끝'}` : '▶ 유튜브 영상') : '🌐 웹 링크';
       const group = new fabric.Group([
-        new fabric.Rect({ width: 240, height: 100, fill: '#fff', stroke: '#10b981', strokeWidth: 2, rx: 12, ry: 12, originX: 'left', originY: 'top' }),
-        new fabric.FabricText('🌐 웹 링크', { fontSize: 15, left: 18, top: 16, fill: '#059669', fontWeight: 'bold', fontFamily: KOREAN_FONT, originX: 'left', originY: 'top' }),
-        new fabric.FabricText(display, { fontSize: 11, left: 18, top: 46, fill: '#666', originX: 'left', originY: 'top' }),
-        new fabric.FabricText('선택하면 열기 버튼이 나타납니다', { fontSize: 10, left: 18, top: 70, fill: '#3b82f6', fontFamily: KOREAN_FONT, originX: 'left', originY: 'top' }),
+        new fabric.Rect({ width: 260, height: 100, fill: '#fff', stroke: accent, strokeWidth: 2, rx: 12, ry: 12, originX: 'left', originY: 'top' }),
+        new fabric.Rect({ width: 6, height: 76, left: 10, top: 12, fill: accent, rx: 3, ry: 3, originX: 'left', originY: 'top' }),
+        new fabric.FabricText(head, { fontSize: 15, left: 26, top: 16, fill: accent, fontWeight: 'bold', fontFamily: KOREAN_FONT, originX: 'left', originY: 'top' }),
+        new fabric.FabricText(display, { fontSize: 11, left: 26, top: 46, fill: '#666', originX: 'left', originY: 'top' }),
+        new fabric.FabricText('두 번 누르면 수업 화면에서 열립니다', { fontSize: 10, left: 26, top: 70, fill: '#3b82f6', fontFamily: KOREAN_FONT, originX: 'left', originY: 'top' }),
       ]);
       (group as any).isWebLink = true;
       (group as any).url = url;
+      if (hasClip) { (group as any).clipStart = clip!.start; (group as any).clipEnd = clip!.end; }
       placeAtCenter(group);
       addAndSelect(group);
     },
@@ -752,6 +841,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     },
     hasLockedContent: () => !!fabricRef.current?.getObjects().some(o => !isHelper(o) && (isLocked(o) || (o as any).isBackground)),
     fitToContent: () => fitToContent(),
+    stepPage,
     getLaserCanvas: () => laserCanvasRef.current,
     getRecordLayers: () => {
       const c: any = fabricRef.current;
@@ -782,10 +872,45 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       (group as any).isModel = true;
       (group as any).modelId = asset.id;
       (group as any).modelName = asset.name;
+      if (asset.driveId) (group as any).driveId = asset.driveId;
       placeAtCenter(group);
       addAndSelect(group);
     },
-    addScore: async (svg, scoreData, title) => {
+    highlightScore: (key, measure) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return false;
+      const clear = () => {
+        if (scoreHlRef.current) { canvas.remove(scoreHlRef.current); scoreHlRef.current = null; canvas.requestRenderAll(); }
+      };
+      if (!key || measure < 0) { clear(); return false; }
+      for (const o of canvas.getObjects() as any[]) {
+        if (!o.isScore || (o.scoreKey || o.id) !== key || !o.scoreBoxes || o.visible === false) continue;
+        if (!o.__boxes) { try { o.__boxes = JSON.parse(o.scoreBoxes); } catch { o.__boxes = []; } }
+        const b = (o.__boxes as { m: number; x: number; y: number; w: number; h: number }[]).find(x => x.m === measure);
+        if (!b) continue;
+        const M = o.calcTransformMatrix();
+        const p0 = fabric.util.transformPoint(new fabric.Point(b.x - o.width / 2, b.y - o.height / 2), M);
+        const p1 = fabric.util.transformPoint(new fabric.Point(b.x + b.w - o.width / 2, b.y + b.h - o.height / 2), M);
+        const left = Math.min(p0.x, p1.x), top = Math.min(p0.y, p1.y), width = Math.abs(p1.x - p0.x), height = Math.abs(p1.y - p0.y);
+        let hl = scoreHlRef.current;
+        if (!hl) {
+          hl = new fabric.Rect({
+            originX: 'left', originY: 'top', fill: 'rgba(99,102,241,0.14)', stroke: 'rgba(79,70,229,0.75)', strokeWidth: 2,
+            rx: 6, ry: 6, selectable: false, evented: false, excludeFromExport: true, objectCaching: false, strokeUniform: true,
+          });
+          scoreHlRef.current = hl;
+          canvas.add(hl);
+        } else if (canvas.getObjects().indexOf(hl) < 0) canvas.add(hl);
+        hl.set({ left, top, width, height });
+        hl.setCoords();
+        canvas.bringObjectToFront(hl);
+        canvas.requestRenderAll();
+        return true;
+      }
+      clear();
+      return false;
+    },
+    addScore: async (svg, scoreData, title, extra = {}) => {
       const canvas = fabricRef.current;
       if (!canvas) return;
       const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
@@ -796,6 +921,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       (img as any).isScore = true;
       (img as any).scoreData = scoreData;
       (img as any).scoreTitle = title;
+      if (extra.scoreKey) (img as any).scoreKey = extra.scoreKey;
+      if (extra.scoreBoxes) (img as any).scoreBoxes = extra.scoreBoxes;
       placeAtCenter(img);
       addAndSelect(img);
     },
@@ -815,7 +942,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     deleteSelected: handleDeleteSelected,
     group: handleGroup,
     ungroup: handleUngroup,
-  }), [undo, redo, commitChange, applyToolState, selectObjects, fitToContent, placeAtCenter, addAndSelect, getCanvas, handleImagesAdd, handleCopy, handlePaste, handleCut, handleDeleteSelected, handleGroup, handleUngroup]);
+  }), [undo, redo, commitChange, applyToolState, selectObjects, fitToContent, stepPage, placeAtCenter, addAndSelect, getCanvas, handleImagesAdd, handleCopy, handlePaste, handleCut, handleDeleteSelected, handleGroup, handleUngroup]);
 
   // ---------- 캔버스 초기화 (한 번) ----------
   useEffect(() => {
@@ -839,6 +966,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       containerClass: 'whiteboard-canvas-container',
     });
     fabricRef.current = canvas;
+    (window as any).__okbCanvas = canvas; // 자동 점검(테스트)용
     fabric.FabricObject.ownDefaults.objectCaching = true;
 
     container.style.touchAction = 'none';
@@ -846,6 +974,13 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     container.querySelectorAll('canvas').forEach(c => { (c as HTMLCanvasElement).style.touchAction = 'none'; });
 
     // --- 객체 이벤트 ---
+    let lastVpt = '';
+    canvas.on('after:render', () => {
+      paintBackground();
+      const v = canvas.viewportTransform;
+      const k = v ? `${v[0]}|${v[4]}|${v[5]}|${canvas.width}|${canvas.height}` : '';
+      if (k !== lastVpt) { lastVpt = k; propsRef.current.onViewChange?.(); }
+    });
     canvas.on('object:added', e => {
       const obj = e.target;
       if (!obj || isHelper(obj)) return;
@@ -880,8 +1015,21 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     // --- 확대/축소 (휠) ---
     canvas.on('mouse:wheel', opt => {
       const e = opt.e as WheelEvent;
-      if (!e || !e.deltaY) return;
-      let zoom = canvas.getZoom() * 0.999 ** e.deltaY;
+      if (!e || (!e.deltaY && !e.deltaX)) return;
+      // 휠·두 손가락 쓸기는 화면 이동, Ctrl(또는 두 손가락 벌리기)+휠은 확대·축소
+      if (!e.ctrlKey && !e.metaKey) {
+        const v = canvas.viewportTransform;
+        const unit = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? canvas.height : 1;
+        const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit;
+        const dy = (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * unit;
+        canvas.setViewportTransform([v[0], v[1], v[2], v[3], v[4] - dx, v[5] - dy]);
+        canvas.requestRenderAll();
+        forceRender(n => n + 1);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      let zoom = canvas.getZoom() * 0.995 ** e.deltaY;
       zoom = Math.min(20, Math.max(0.05, zoom));
       canvas.zoomToPoint(new fabric.Point(e.offsetX, e.offsetY), zoom);
       canvas.requestRenderAll();
@@ -981,7 +1129,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
           const { x, y } = clientXY(e);
           const px = ctx.getImageData((x - rect.left) * (el.width / rect.width), (y - rect.top) * (el.height / rect.height), 1, 1).data;
           let hex = '#' + ((1 << 24) + (px[0] << 16) + (px[1] << 8) + px[2]).toString(16).slice(1);
-          if (px[3] === 0) hex = backgroundRef.current === 'dark' ? '#1a202c' : '#ffffff';
+          if (px[3] === 0) hex = backgroundColor(backgroundRef.current);
           propsRef.current.onColorPicked?.(hex);
         } catch (err) {
           console.error('스포이트 오류', err);
@@ -1213,7 +1361,10 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
       if (token !== loadTokenRef.current) return; // 더 최근의 불러오기가 시작됨
       afterLoad();
-      if (propsRef.current.autoFit) {
+      const pagesAfterLoad = stackedPages();
+      if (switchingScene && pagesAfterLoad.length > 1) {
+        fitRect(pagesAfterLoad[0].getBoundingRect());
+      } else if (propsRef.current.autoFit) {
         fitToContent();
       } else if (switchingScene) {
         canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
@@ -1290,26 +1441,16 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   useEffect(() => { applyBackground(); }, [canvasBackground, applyBackground]);
 
   const vpt = fabricRef.current?.viewportTransform || [1, 0, 0, 1, 0, 0];
-  const bgSize = canvasBackground === 'grid' ? 40 * vpt[0] : 24 * vpt[0];
 
   return (
     <div
       ref={containerRef}
       className={cn(
         'w-full h-full overflow-hidden relative transition-colors duration-300 touch-none',
-        canvasBackground === 'dark' ? 'bg-[#1a202c]' : 'bg-white',
       )}
-      style={{
-        backgroundImage:
-          canvasBackground === 'grid'
-            ? 'linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)'
-            : canvasBackground === 'dot'
-              ? 'radial-gradient(circle, #d1d5db 1.5px, transparent 1.5px)'
-              : 'none',
-        backgroundSize: canvasBackground === 'grid' || canvasBackground === 'dot' ? `${bgSize}px ${bgSize}px` : 'auto',
-        backgroundPosition: `${vpt[4]}px ${vpt[5]}px`,
-      }}
+      style={{ backgroundColor: backgroundColor(canvasBackground) }}
     >
+      <canvas ref={bgCanvasRef} className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }} aria-hidden="true" />
       <canvas ref={canvasRef} />
       <canvas ref={laserCanvasRef} className="absolute inset-0 pointer-events-none z-[90]" style={{ width: '100%', height: '100%' }} aria-hidden="true" />
 
@@ -1335,7 +1476,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
 
       {/* 선택한 객체용 작업 막대 */}
       {hasSelection && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 bg-white p-2 rounded-2xl shadow-lg border border-gray-100">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 bg-white/95 backdrop-blur-xl p-1.5 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_8px_24px_-8px_rgba(15,23,42,0.25)]">
           <ActionButton onClick={handleCopy} title="복사 (Ctrl+C)">
             <rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
           </ActionButton>

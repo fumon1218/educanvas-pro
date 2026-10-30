@@ -14,7 +14,9 @@ const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).p
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5];
 
 /** 선택한 악보를 악기 소리로 연주한다 */
-export const ScorePlayerBar: React.FC<{ scoreData: string; objectId?: string }> = ({ scoreData, objectId }) => {
+export const ScorePlayerBar: React.FC<{ scoreData: string; objectId?: string; onPosition?: (sec: number | null) => void }> = ({ scoreData, objectId, onPosition }) => {
+  const onPosRef = useRef(onPosition);
+  onPosRef.current = onPosition;
   const score = useMemo<Score | null>(() => { try { return JSON.parse(scoreData); } catch { return null; } }, [scoreData]);
   const playable = useMemo(() => (score ? buildPlayable(score) : null), [score]);
   const [playing, setPlaying] = useState(false);
@@ -32,8 +34,8 @@ export const ScorePlayerBar: React.FC<{ scoreData: string; objectId?: string }> 
       setPos(0);
       setPlaying(false);
     }
-    p.onEnd = () => { setPlaying(false); setPos(0); };
-    const t = setInterval(() => { if (p.playing) setPos(p.position); }, 200);
+    p.onEnd = () => { setPlaying(false); setPos(0); onPosRef.current?.(null); };
+    const t = setInterval(() => { if (p.playing) { setPos(p.position); onPosRef.current?.(p.position); } }, 120);
     return () => clearInterval(t);
   }, [playable, objectId, scoreData]);
 
@@ -53,7 +55,7 @@ export const ScorePlayerBar: React.FC<{ scoreData: string; objectId?: string }> 
     await p.play(pos);
     setLoading(false);
   };
-  const stop = () => { player().stop(); setPlaying(false); setPos(0); };
+  const stop = () => { player().stop(); setPlaying(false); setPos(0); onPosRef.current?.(null); };
   const total = playable.total / speed;
 
   return (
@@ -65,7 +67,7 @@ export const ScorePlayerBar: React.FC<{ scoreData: string; objectId?: string }> 
       <button onClick={stop} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg" aria-label="정지" title="정지"><Square size={16} /></button>
       <input
         type="range" min={0} max={playable.total} step={0.1} value={pos}
-        onChange={e => { const v = parseFloat(e.target.value); setPos(v); const p = player(); if (p.playing) p.play(v); }}
+        onChange={e => { const v = parseFloat(e.target.value); setPos(v); onPosRef.current?.(v); const p = player(); if (p.playing) p.play(v); }}
         className="w-40 accent-indigo-600" aria-label="연주 위치"
       />
       <span className="text-xs tabular-nums text-slate-500 w-20">{fmt(pos / speed)} / {fmt(total)}</span>

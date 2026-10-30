@@ -1,15 +1,20 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type * as fabric from 'fabric';
-import { Whiteboard, WhiteboardHandle, ToolType, CanvasBackground, MediaSelection, CanvasChangeInfo } from './components/Canvas/Whiteboard';
+import { Whiteboard, WhiteboardHandle, ToolType, CanvasBackground, MediaSelection, CanvasChangeInfo, coordOrigin } from './components/Canvas/Whiteboard';
+import { isBackgroundId, isDarkBackground, backgroundColor } from './lib/backgrounds';
+import { StudentCaster, makeCastCode, castUrl, type CastView } from './lib/studentCast';
+import { StudentCastModal } from './components/Cast/StudentCastModal';
 import { Toolbar } from './components/UI/Toolbar';
 import { MediaController } from './components/UI/MediaController';
+import { ScoreDock } from './components/UI/ScoreDock';
+import { measureAt as measureAtSec } from './music/renderScore';
 import { LayerPanel } from './components/UI/LayerPanel';
 import { TopNavBar } from './components/UI/TopNavBar';
 import { BottomNavBar } from './components/UI/BottomNavBar';
 import { SettingsModal } from './components/UI/SettingsModal';
 import { SlideNavigator } from './components/UI/SlideNavigator';
 import { FloatingCamera } from './components/UI/FloatingCamera';
-import { PdfImportModal } from './components/UI/PdfImportModal';
+import { PdfImportModal, type PdfImportMode } from './components/UI/PdfImportModal';
 import { CollaborationModal } from './components/UI/CollaborationModal';
 import { ConfirmDialog, ConfirmState } from './components/UI/ConfirmDialog';
 import { PresentationBar } from './components/Present/PresentationBar';
@@ -17,7 +22,7 @@ import { ShadeOverlay, SpotlightOverlay, TimerWidget, createOverlayState, drawOv
 import { RecordStartDialog, RecordingStatus, RecordingResultDialog } from './components/Record/RecorderUI';
 import { LessonRecorder, RecordingResult, isRecordingSupported } from './lib/lessonRecorder';
 import { FloatingWindow, type WindowRect } from './components/Windows/FloatingWindow';
-import { WebBrowserPane } from './components/Windows/WebBrowserPane';
+import { WebBrowserPane, type Clip } from './components/Windows/WebBrowserPane';
 import { ModelViewerPane } from './components/Windows/ModelViewerPane';
 import { AssetLibrary, importModelFiles } from './components/Windows/AssetLibrary';
 import { Globe, Box } from 'lucide-react';
@@ -27,7 +32,9 @@ interface AppWindow {
   kind: 'web' | 'model';
   title: string;
   url?: string;
+  clip?: Clip;
   modelId?: string;
+  driveId?: string;
   rect: WindowRect;
   minimized: boolean;
   maximized: boolean;
@@ -40,7 +47,7 @@ import { cn } from './lib/utils';
 import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { newId, normalizeSceneData, renderSceneImage, createImageScene, createScoreScene } from './lib/canvasData';
+import { newId, normalizeSceneData, renderSceneImage, createImageScene, createScoreScene, createStackedPdfScene } from './lib/canvasData';
 import { saveProject, loadProject, isValidProject, downloadProjectFile, StoredProject } from './lib/projectStore';
 
 interface Scene {
@@ -49,6 +56,7 @@ interface Scene {
   data: string | null;
   thumbnail?: string;
   order: number;
+  background?: CanvasBackground;
 }
 
 const FIRESTORE_SCENE_LIMIT = 900_000;
@@ -66,7 +74,6 @@ export default function App() {
   const [isVertical, setIsVertical] = useState(true);
   const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>('blank');
   const canvasBgRef = useRef(canvasBackground);
-  canvasBgRef.current = canvasBackground;
 
   // ---------- 슬라이드 ----------
   const [projectName, setProjectName] = useState('새 수업');
@@ -105,12 +112,12 @@ export default function App() {
   const [windows, setWindows] = useState<AppWindow[]>([]);
   const zTopRef = useRef(90);
   const winElsRef = useRef(new Map<string, HTMLDivElement>());
-  const modelCanvasRef = useRef(new Map<string, HTMLCanvasElement>());
+  const modelCanvasRef = useRef(new Map<string, HTMLCanvasElement[]>());
   const windowsRef = useRef(windows);
   windowsRef.current = windows;
   const [assetsOpen, setAssetsOpen] = useState(false);
-  const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
-  const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
+  const [pendingPdf, setPendingPdf] = useState<{ name: string; numPages: number; preview: string | null } | null>(null);
+  const pdfDocRef = useRef<any>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
 
   // ---------- 그리기 상태 ----------
@@ -497,6 +504,9 @@ export default function App() {
     const i = scenesRef.current.findIndex(s => s.id === activeIdRef.current);
     if (i > 0) goToScene(scenesRef.current[i - 1].id);
   }, [goToScene]);
+  /** 리모컨·키보드: 한 슬라이드에 이어 붙인 PDF는 쪽부터 넘기고, 끝나면 다음 슬라이드 */
+  const handleNextStep = useCallback(() => { if (!whiteboardRef.current?.stepPage(1)) handleNextSlide(); }, [handleNextSlide]);
+  const handlePrevStep = useCallback(() => { if (!whiteboardRef.current?.stepPage(-1)) handlePrevSlide(); }, [handlePrevSlide]);
 
   // 프레젠터(클리커)·키보드로 슬라이드 넘기기
   useEffect(() => {
@@ -505,12 +515,12 @@ export default function App() {
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       if (confirmState) return;
       const hasSelection = !!whiteboardRef.current?.getCanvas()?.getActiveObject();
-      if (e.key === 'PageDown' || (e.key === 'ArrowRight' && !hasSelection)) { e.preventDefault(); handleNextSlide(); }
-      else if (e.key === 'PageUp' || (e.key === 'ArrowLeft' && !hasSelection)) { e.preventDefault(); handlePrevSlide(); }
+      if (e.key === 'PageDown' || (e.key === 'ArrowRight' && !hasSelection)) { e.preventDefault(); handleNextStep(); }
+      else if (e.key === 'PageUp' || (e.key === 'ArrowLeft' && !hasSelection)) { e.preventDefault(); handlePrevStep(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleNextSlide, handlePrevSlide, confirmState]);
+  }, [handleNextStep, handlePrevStep, confirmState]);
 
   const handleClear = useCallback(() => {
     const hasLocked = !!whiteboardRef.current?.hasLockedContent();
@@ -538,7 +548,7 @@ export default function App() {
       savedAt: new Date().toISOString(),
       activeSceneId: activeIdRef.current,
       canvasBackground,
-      scenes: scenesRef.current.map(({ id, name, data, thumbnail }) => ({ id, name, data, thumbnail })),
+      scenes: scenesRef.current.map(({ id, name, data, thumbnail, background }) => ({ id, name, data, thumbnail, ...(background ? { background } : {}) })),
     };
   }, [captureCurrent, projectName, canvasBackground]);
 
@@ -557,10 +567,10 @@ export default function App() {
   }, [buildProject]);
 
   const applyProject = useCallback((p: StoredProject, opts: { publish?: boolean } = {}) => {
-    const list: Scene[] = p.scenes.map((s, i) => ({ id: s.id, name: s.name, data: normalizeSceneData(s.data), thumbnail: s.thumbnail, order: i }));
+    const list: Scene[] = p.scenes.map((s, i) => ({ id: s.id, name: s.name, data: normalizeSceneData(s.data), thumbnail: s.thumbnail, order: i, ...(isBackgroundId(s.background) ? { background: s.background } : {}) }));
     const removed = scenesRef.current.filter(s => !list.some(n => n.id === s.id)).map(s => s.id);
     setProjectName(p.name || '수업');
-    if (p.canvasBackground) setCanvasBackground(p.canvasBackground);
+    if (isBackgroundId(p.canvasBackground)) setCanvasBackground(p.canvasBackground);
     updateScenes(() => list);
     const target = list.some(s => s.id === p.activeSceneId) ? p.activeSceneId : list[0].id;
     if (target === activeIdRef.current) bumpRevision();
@@ -650,10 +660,9 @@ export default function App() {
     try {
       const { jsPDF } = await import('jspdf');
       let pdf: InstanceType<typeof jsPDF> | null = null;
-      const bg = canvasBackground === 'dark' ? '#1a202c' : '#ffffff';
       for (let i = 0; i < targets.length; i++) {
         toast.loading(`PDF를 만드는 중… (${i + 1}/${targets.length})`, { id: toastId });
-        const img = await renderSceneImage(targets[i].data, canvas.width, canvas.height, bg);
+        const img = await renderSceneImage(targets[i].data, canvas.width, canvas.height, backgroundColor(targets[i].background ?? canvasBackground));
         const orientation = img.width >= img.height ? 'landscape' : 'portrait';
         if (!pdf) pdf = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
         else pdf.addPage('a4', orientation);
@@ -697,11 +706,8 @@ export default function App() {
     publishStructure(removed);
   }, [captureCurrent, updateScenes, setActiveSceneId, publishStructure]);
 
-  const processPdf = async (mode: 'single' | 'multiple') => {
-    const file = pendingPdfFile;
-    if (!file) return;
-    setIsPdfImportModalOpen(false);
-    setPendingPdfFile(null);
+  /** PDF를 먼저 열어 쪽 수와 첫 쪽 미리보기를 보여 준다 */
+  const openPdf = useCallback(async (file: File) => {
     const toastId = toast.loading('PDF를 여는 중…');
     try {
       const [pdfjs, worker] = await Promise.all([
@@ -709,13 +715,49 @@ export default function App() {
         import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
       ]);
       pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-      const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
-      const pages: string[] = [];
-      for (let i = 1; i <= pdf.numPages; i++) {
-        toast.loading(`PDF 페이지 변환 중… (${i}/${pdf.numPages})`, { id: toastId });
-        const page = await pdf.getPage(i);
+      const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+      let preview: string | null = null;
+      try {
+        const page = await doc.getPage(1);
         const base = page.getViewport({ scale: 1 });
-        const viewport = page.getViewport({ scale: Math.min(2, 1600 / base.width) });
+        const vp = page.getViewport({ scale: 240 / base.width });
+        const c = document.createElement('canvas');
+        c.width = vp.width; c.height = vp.height;
+        const ctx = c.getContext('2d')!;
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+        await page.render({ canvasContext: ctx, viewport: vp } as any).promise;
+        preview = c.toDataURL('image/jpeg', 0.8);
+      } catch { /* 미리보기는 없어도 된다 */ }
+      toast.dismiss(toastId);
+      pdfDocRef.current?.destroy?.();
+      pdfDocRef.current = doc;
+      setPendingPdf({ name: file.name, numPages: doc.numPages, preview });
+    } catch (err) {
+      console.error(err);
+      toast.error('PDF를 열지 못했습니다.', { id: toastId, description: '암호가 걸려 있거나 손상된 파일일 수 있습니다.' });
+    }
+  }, []);
+
+  const closePdf = useCallback(() => {
+    setPendingPdf(null);
+    pdfDocRef.current?.destroy?.();
+    pdfDocRef.current = null;
+  }, []);
+
+  const processPdf = async (mode: PdfImportMode, from: number, to: number) => {
+    const doc = pdfDocRef.current;
+    const info = pendingPdf;
+    if (!doc || !info) return;
+    setPendingPdf(null);
+    const count = to - from + 1;
+    const toastId = toast.loading('PDF 쪽을 그림으로 바꾸는 중…');
+    try {
+      const pages: string[] = [];
+      for (let i = from; i <= to; i++) {
+        toast.loading(`PDF 쪽 변환 중… (${i - from + 1}/${count})`, { id: toastId });
+        const page = await doc.getPage(i);
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(2.2, 1700 / base.width) });
         const c = document.createElement('canvas');
         c.width = viewport.width;
         c.height = viewport.height;
@@ -724,25 +766,36 @@ export default function App() {
         ctx.fillRect(0, 0, c.width, c.height);
         await page.render({ canvasContext: ctx, viewport } as any).promise;
         pages.push(c.toDataURL('image/jpeg', 0.85));
+        page.cleanup();
       }
-      if (mode === 'single') {
+      const baseName = info.name.replace(/\.pdf$/i, '');
+      const range = count === 1 ? `${from}쪽` : `${from}~${to}쪽`;
+      if (mode === 'grid') {
         await whiteboardRef.current?.addImages(pages);
-        toast.success(`${pages.length}쪽을 현재 슬라이드에 넣었습니다.`, { id: toastId });
+        toast.success(`${count}쪽을 지금 슬라이드에 넣었습니다.`, { id: toastId });
         return;
       }
       const canvas = whiteboardRef.current?.getCanvas();
       const w = canvas?.width || window.innerWidth;
       const h = canvas?.height || window.innerHeight;
-      const baseName = file.name.replace(/\.pdf$/i, '');
+      if (mode === 'stack') {
+        const data = await createStackedPdfScene(pages, from, w);
+        insertScenesAfterCurrent([{ id: newId(), name: `${baseName} ${range}`.slice(0, 100), data, order: 0 }]);
+        toast.success(`${count}쪽을 슬라이드 하나에 이어 붙였습니다.`, { id: toastId, description: 'PageDown(→)으로 한 쪽씩, 휠·두 손가락으로 위아래로 넘겨 보세요.' });
+        return;
+      }
       const created: Scene[] = [];
       for (let i = 0; i < pages.length; i++) {
-        created.push({ id: newId(), name: `${baseName} ${i + 1}쪽`.slice(0, 100), data: await createImageScene(pages[i], w, h), order: 0 });
+        created.push({ id: newId(), name: `${baseName} ${from + i}쪽`.slice(0, 100), data: await createImageScene(pages[i], w, h), order: 0 });
       }
       insertScenesAfterCurrent(created);
       toast.success(`슬라이드 ${created.length}장을 만들었습니다.`, { id: toastId });
     } catch (err) {
       console.error(err);
-      toast.error('PDF를 열지 못했습니다.', { id: toastId, description: '암호가 걸려 있거나 손상된 파일일 수 있습니다.' });
+      toast.error('PDF를 넣지 못했습니다.', { id: toastId, description: '쪽 수가 많으면 범위를 나누어 넣어 주세요.' });
+    } finally {
+      pdfDocRef.current?.destroy?.();
+      pdfDocRef.current = null;
     }
   };
 
@@ -783,18 +836,18 @@ export default function App() {
     const W = Math.min(w, vw - 40), H = Math.min(h, vh - 120);
     return { x: Math.max(20, (vw - W) / 2 + n * 28 - 40), y: Math.max(70, (vh - H) / 2 + n * 28 - 30), w: W, h: H };
   };
-  const openWebWindow = useCallback((url?: string) => {
+  const openWebWindow = useCallback((url?: string, clip?: Clip) => {
     const id = newId();
-    setWindows(ws => [...ws, { id, kind: 'web', title: '웹 브라우저', url, rect: nextRect(900, 560), minimized: false, maximized: false, z: ++zTopRef.current }]);
+    setWindows(ws => [...ws, { id, kind: 'web', title: '웹 브라우저', url, clip, rect: nextRect(900, 560), minimized: false, maximized: false, z: ++zTopRef.current }]);
   }, []);
-  const openModelWindow = useCallback((modelId: string, name?: string) => {
+  const openModelWindow = useCallback((modelId: string, name?: string, driveId?: string) => {
     const existing = windowsRef.current.find(w => w.kind === 'model' && w.modelId === modelId);
     if (existing) {
       setWindows(ws => ws.map(w => (w.id === existing.id ? { ...w, minimized: false, z: ++zTopRef.current } : w)));
       return;
     }
     const id = newId();
-    setWindows(ws => [...ws, { id, kind: 'model', title: name?.replace(/\.glb$/i, '') || '3D 모델', modelId, rect: nextRect(640, 520), minimized: false, maximized: false, z: ++zTopRef.current }]);
+    setWindows(ws => [...ws, { id, kind: 'model', title: name?.replace(/\.glb$/i, '') || '3D 모델', modelId, driveId, rect: nextRect(640, 520), minimized: false, maximized: false, z: ++zTopRef.current }]);
   }, []);
   const updateWindow = useCallback((id: string, patch: Partial<AppWindow>) => {
     setWindows(ws => ws.map(w => (w.id === id ? { ...w, ...patch } : w)));
@@ -840,7 +893,7 @@ export default function App() {
         if (w.kind === 'model' && mc) {
           ctx.fillStyle = '#eef2f7';
           ctx.fillRect(x, y + bar, ww, hh - bar);
-          ctx.drawImage(mc, x, y + bar, ww, hh - bar);
+          mc.forEach(c => { if (c.width && c.height) ctx.drawImage(c, x, y + bar, ww, hh - bar); });
         } else if (w.kind === 'web') {
           ctx.fillStyle = '#0f172a';
           ctx.fillRect(x, y + bar, ww, hh - bar);
@@ -862,7 +915,7 @@ export default function App() {
     if (!added.length) return;
     for (const a of added.slice(0, 1)) {
       await whiteboardRef.current?.addModelCard(a);
-      openModelWindow(a.id, a.name);
+      openModelWindow(a.id, a.name, a.driveId);
     }
     if (added.length > 1) toast.success(`나머지 ${added.length - 1}개는 3D 자산함에 넣었습니다.`);
   }, [openModelWindow]);
@@ -875,8 +928,10 @@ export default function App() {
       const { score, title } = await loadScoreFile(file);
       const pages = renderScorePages(score, { title });
       const data = JSON.stringify(score);
+      const scoreKey = 'sc-' + newId();
+      const boxesOf = (p: { boxes: unknown }) => JSON.stringify(p.boxes);
       if (pages.length === 1) {
-        await whiteboardRef.current?.addScore(pages[0].svg, data, title);
+        await whiteboardRef.current?.addScore(pages[0].svg, data, title, { scoreKey, scoreBoxes: boxesOf(pages[0]) });
         toast.success('악보를 넣었습니다.', { id: toastId, description: '악보를 선택하면 아래에 연주 막대가 나타납니다.' });
       } else {
         // 긴 악보는 페이지마다 슬라이드 한 장 (PDF와 같은 방식)
@@ -885,7 +940,7 @@ export default function App() {
         const h = canvas?.height || window.innerHeight;
         const created: Scene[] = [];
         for (let i = 0; i < pages.length; i++) {
-          created.push({ id: newId(), name: `${title} ${i + 1}쪽`.slice(0, 100), data: await createScoreScene(pages[i].svg, data, title, w, h), order: 0 });
+          created.push({ id: newId(), name: `${title} ${i + 1}쪽`.slice(0, 100), data: await createScoreScene(pages[i].svg, data, title, w, h, { scoreKey, scoreBoxes: boxesOf(pages[i]) }), order: 0 });
         }
         insertScenesAfterCurrent(created);
         toast.success(`악보를 슬라이드 ${pages.length}장에 나눠 넣었습니다.`, { id: toastId, description: '악보를 선택하면 아래에 연주 막대가 나타납니다. 펜으로 바로 판서할 수 있습니다.' });
@@ -901,8 +956,7 @@ export default function App() {
     const name = file.name.toLowerCase();
     const { isScoreFileName } = await import('./music/loadScore');
     if (file.type === 'application/pdf' || name.endsWith('.pdf')) {
-      setPendingPdfFile(file);
-      setIsPdfImportModalOpen(true);
+      openPdf(file);
     } else if (name.endsWith('.glb')) {
       handleModelFiles([file]);
     } else if (isScoreFileName(name) && !file.type.startsWith('image/')) {
@@ -910,7 +964,7 @@ export default function App() {
     } else {
       whiteboardRef.current?.addFile(file);
     }
-  }, [handleModelFiles, handleScoreFile]);
+  }, [handleModelFiles, handleScoreFile, openPdf]);
 
   // 파일을 화면에 끌어다 놓아도 넣을 수 있게
   useEffect(() => {
@@ -928,6 +982,145 @@ export default function App() {
     window.addEventListener('drop', drop);
     return () => { window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); };
   }, [routeFile, handleModelFiles]);
+
+  // =====================================================================
+  // 악보 연주 · 따라가기
+  // =====================================================================
+  const [activeScore, setActiveScore] = useState<{ key: string; data: string; title?: string } | null>(null);
+  const [scoreFollow, setScoreFollow] = useState(true);
+  const scoreFollowRef = useRef(scoreFollow);
+  scoreFollowRef.current = scoreFollow;
+  const scoreNavRef = useRef<{ key: string; timeline: { t: number; m: number }[]; sceneOf: Map<number, string>; lastM: number; lastJump: number } | null>(null);
+
+  // 악보를 선택하면 연주 막대를 띄운다 (다른 것을 선택해도 연주 막대는 남는다)
+  useEffect(() => {
+    if (mediaSelection.type !== 'score' || !mediaSelection.scoreData) return;
+    const key = mediaSelection.scoreKey || mediaSelection.objectId || 'score';
+    setActiveScore(prev => (prev?.key === key ? prev : { key, data: mediaSelection.scoreData!, title: mediaSelection.name }));
+  }, [mediaSelection]);
+
+  // 악보가 바뀌면 마디 시간표와 '마디 → 슬라이드' 지도를 만든다
+  useEffect(() => {
+    if (!activeScore) { scoreNavRef.current = null; return; }
+    let cancelled = false;
+    (async () => {
+      const { measureTimeline } = await import('./music/renderScore');
+      let timeline: { t: number; m: number }[] = [];
+      try { timeline = measureTimeline(JSON.parse(activeScore.data)); } catch { /* 무시 */ }
+      const sceneOf = new Map<number, string>();
+      for (const sc of scenesRef.current) {
+        if (!sc.data || !sc.data.includes(activeScore.key)) continue;
+        try {
+          const objs: any[] = JSON.parse(sc.data).objects || [];
+          objs.forEach(o => {
+            if (!o?.isScore || (o.scoreKey || o.id) !== activeScore.key || !o.scoreBoxes) return;
+            (JSON.parse(o.scoreBoxes) as { m: number }[]).forEach(b => { if (!sceneOf.has(b.m)) sceneOf.set(b.m, sc.id); });
+          });
+        } catch { /* 무시 */ }
+      }
+      if (!cancelled) scoreNavRef.current = { key: activeScore.key, timeline, sceneOf, lastM: -1, lastJump: 0 };
+    })();
+    return () => { cancelled = true; };
+  }, [activeScore]);
+
+  const handleScorePosition = useCallback((sec: number | null) => {
+    const nav = scoreNavRef.current;
+    const wb = whiteboardRef.current;
+    if (!nav || !wb) return;
+    if (sec == null || !scoreFollowRef.current) { wb.highlightScore(null, -1); nav.lastM = -1; return; }
+    const m = measureAtSec(nav.timeline, sec);
+    nav.lastM = m;
+    if (wb.highlightScore(nav.key, m)) return;
+    // 이 슬라이드에 없는 마디: 그 마디가 있는 슬라이드로 넘긴다 (불러오는 동안 한 번만)
+    const target = nav.sceneOf.get(m);
+    const now = Date.now();
+    if (target && target !== activeIdRef.current && now - nav.lastJump > 700) {
+      nav.lastJump = now;
+      goToScene(target);
+    }
+  }, [goToScene]);
+
+  const closeScore = useCallback(() => {
+    whiteboardRef.current?.highlightScore(null, -1);
+    setActiveScore(null);
+  }, []);
+
+  // =====================================================================
+  // 학생 화면 보내기 (읽기 전용)
+  // =====================================================================
+  const [castOpen, setCastOpen] = useState(false);
+  const [cast, setCast] = useState<{ status: 'idle' | 'connecting' | 'live' | 'error'; code: string | null; url: string | null; count: number }>({ status: 'idle', code: null, url: null, count: 0 });
+  const casterRef = useRef<StudentCaster | null>(null);
+  const castSentRef = useRef<{ id: string; data: string | null; bg: string } | null>(null);
+  const castViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const castLaserAt = useRef(0);
+
+  const currentView = useCallback((): CastView => {
+    const c = whiteboardRef.current?.getCanvas();
+    if (!c) return { x: 0, y: 0, w: 1280, h: 720 };
+    const v = c.viewportTransform || [1, 0, 0, 1, 0, 0];
+    return { x: -v[4] / v[0], y: -v[5] / v[3], w: c.width / v[0], h: c.height / v[3] };
+  }, []);
+
+  const pushCastScene = useCallback((force = false) => {
+    const caster = casterRef.current;
+    if (!caster) return;
+    const list = scenesRef.current;
+    const idx = list.findIndex(s => s.id === activeIdRef.current);
+    const sc = list[idx];
+    if (!sc) return;
+    const bg = canvasBgRef.current;
+    const prev = castSentRef.current;
+    if (!force && prev && prev.id === sc.id && prev.data === sc.data && prev.bg === bg) return;
+    castSentRef.current = { id: sc.id, data: sc.data, bg };
+    const c = whiteboardRef.current?.getCanvas();
+    caster.send({ type: 'scene', sceneId: sc.id, index: idx, total: list.length, name: sc.name, data: sc.data, bg, origin: coordOrigin(c ?? { width: 0, height: 0 }), view: currentView() });
+  }, [currentView]);
+
+  const startCast = useCallback(() => {
+    casterRef.current?.stop();
+    const code = makeCastCode();
+    const caster = new StudentCaster(code);
+    caster.onStatus = st => setCast(c => ({ ...c, status: st === 'live' ? 'live' : st }));
+    caster.onCount = n => setCast(c => ({ ...c, count: n }));
+    casterRef.current = caster;
+    castSentRef.current = null;
+    setCast({ status: 'connecting', code, url: castUrl(code), count: 0 });
+    caster.start();
+    captureCurrent();
+    pushCastScene(true);
+  }, [captureCurrent, pushCastScene]);
+
+  const stopCast = useCallback(() => {
+    casterRef.current?.stop();
+    casterRef.current = null;
+    setCast({ status: 'idle', code: null, url: null, count: 0 });
+    toast.success('학생 화면 보내기를 끝냈습니다.', { duration: 1500 });
+  }, []);
+
+  // 보내는 동안: 슬라이드·판서가 바뀌면 보낸다
+  useEffect(() => {
+    if (cast.status === 'idle') return;
+    const t = setInterval(() => pushCastScene(), 600);
+    return () => clearInterval(t);
+  }, [cast.status, pushCastScene]);
+  useEffect(() => () => casterRef.current?.stop(), []);
+
+  const handleViewChange = useCallback(() => {
+    if (!casterRef.current || castViewTimer.current) return;
+    castViewTimer.current = setTimeout(() => {
+      castViewTimer.current = null;
+      casterRef.current?.send({ type: 'view', view: currentView() });
+    }, 200);
+  }, [currentView]);
+
+  const handleLaser = useCallback((x: number, y: number) => {
+    if (!casterRef.current) return;
+    const now = Date.now();
+    if (now - castLaserAt.current < 50) return;
+    castLaserAt.current = now;
+    casterRef.current.send({ type: 'laser', x, y });
+  }, []);
 
   // =====================================================================
   // 발표 모드
@@ -1001,9 +1194,9 @@ export default function App() {
       container,
       getLayers: () => whiteboardRef.current?.getRecordLayers() ?? [],
       getBackground: () => ({
-        color: canvasBgRef.current === 'dark' ? '#1a202c' : '#ffffff',
-        pattern: canvasBgRef.current === 'grid' ? 'grid' : canvasBgRef.current === 'dot' ? 'dot' : 'none',
+        kind: canvasBgRef.current,
         vpt: (whiteboardRef.current?.getCanvas()?.viewportTransform as number[]) || [1, 0, 0, 1, 0, 0],
+        origin: coordOrigin(whiteboardRef.current?.getCanvas() ?? { width: 0, height: 0 }),
       }),
       drawOverlays: (ctx, w, h, scale) => {
         const cr = whiteboardRef.current?.getContainer()?.getBoundingClientRect();
@@ -1073,12 +1266,22 @@ export default function App() {
     toast.success('색을 골랐습니다.', { duration: 1200 });
   }, []);
 
-  const handleCanvasBackgroundChange = useCallback((bg: CanvasBackground) => {
-    setCanvasBackground(bg);
-    setColor(prev => (bg === 'dark' && prev === '#000000' ? '#ffffff' : bg !== 'dark' && prev === '#ffffff' ? '#000000' : prev));
-  }, []);
+  /** 배경 바꾸기: 이 슬라이드만 또는 모든 슬라이드 */
+  const handleCanvasBackgroundChange = useCallback((bg: CanvasBackground, scope: 'slide' | 'all' = 'all') => {
+    if (scope === 'all') {
+      setCanvasBackground(bg);
+      updateScenes(list => list.map(s => (s.background ? { ...s, background: undefined } : s)));
+    } else {
+      updateScenes(list => list.map(s => (s.id === activeIdRef.current ? { ...s, background: bg } : s)));
+    }
+    dirtyRef.current = true;
+    const dark = isDarkBackground(bg);
+    setColor(prev => (dark && prev === '#000000' ? '#ffffff' : !dark && prev === '#ffffff' ? '#000000' : prev));
+  }, [updateScenes]);
 
   const activeScene = scenes.find(s => s.id === activeSceneId);
+  const effectiveBg: CanvasBackground = activeScene?.background ?? canvasBackground;
+  canvasBgRef.current = effectiveBg;
 
   return (
     <div className={cn('fixed inset-0 overflow-hidden font-sans text-slate-900', isPresenting ? 'bg-white' : 'bg-[#eef1f6]')}>
@@ -1113,6 +1316,11 @@ export default function App() {
         spotlightOn={spotlightOn}
         timerOn={timerOn}
         saveState={saveState}
+        background={effectiveBg}
+        onBackgroundChange={handleCanvasBackgroundChange}
+        onOpenStudentCast={() => setCastOpen(true)}
+        castOn={cast.status !== 'idle'}
+        castCount={cast.count}
       />
       )}
       <input
@@ -1136,11 +1344,13 @@ export default function App() {
           tool={activeTool}
           color={color}
           brushSize={brushSize}
-          canvasBackground={canvasBackground}
+          canvasBackground={effectiveBg}
           sceneId={activeSceneId}
           sceneData={activeScene?.data ?? null}
           sceneRevision={sceneRevision}
           onCanvasChange={handleCanvasChange}
+          onViewChange={handleViewChange}
+          onLaser={handleLaser}
           onSelectionChange={setMediaSelection}
           onZoomChange={setZoomLevel}
           onColorPicked={handleColorPicked}
@@ -1148,8 +1358,8 @@ export default function App() {
           onRequestTool={setActiveTool}
           onPointerMove={handlePointerMove}
           onOpenObject={sel => {
-            if (sel.type === 'model' && sel.modelId) openModelWindow(sel.modelId, sel.name);
-            else if (sel.type === 'weblink' && sel.url) openWebWindow(sel.url);
+            if (sel.type === 'model' && sel.modelId) openModelWindow(sel.modelId, sel.name, sel.driveId);
+            else if (sel.type === 'weblink' && sel.url) openWebWindow(sel.url, sel.clipStart != null || sel.clipEnd != null ? { start: sel.clipStart, end: sel.clipEnd } : undefined);
           }}
           onResize={handleWhiteboardResize}
           autoFit={isPresenting}
@@ -1191,11 +1401,23 @@ export default function App() {
       />
       </>)}
 
+      {activeScore && (
+        <ScoreDock
+          scoreData={activeScore.data}
+          scoreKey={activeScore.key}
+          title={activeScore.title}
+          follow={scoreFollow}
+          onToggleFollow={() => setScoreFollow(f => !f)}
+          onPosition={handleScorePosition}
+          onClose={closeScore}
+          presenting={isPresenting}
+        />
+      )}
       <MediaController
-        selection={mediaSelection}
+        selection={mediaSelection.type === 'score' ? { type: 'none' } : mediaSelection}
         onClose={() => setMediaSelection({ type: 'none' })}
-        onOpenWeb={url => openWebWindow(url)}
-        onOpenModel={(id, name) => openModelWindow(id, name)}
+        onOpenWeb={(url, clip) => openWebWindow(url, clip)}
+        onOpenModel={(id, name, driveId) => openModelWindow(id, name, driveId)}
       />
 
       {windows.map(w => (
@@ -1218,12 +1440,15 @@ export default function App() {
           {w.kind === 'web' ? (
             <WebBrowserPane
               initialUrl={w.url}
+              initialClip={w.clip}
               onTitle={t => updateWindow(w.id, { title: t })}
-              onPinToCanvas={url => { whiteboardRef.current?.addWebLink(url); toast.success('캔버스에 링크 카드를 넣었습니다.'); }}
+              onPinToCanvas={(url, clip) => { whiteboardRef.current?.addWebLink(url, clip); toast.success(clip ? '캔버스에 유튜브 구간 카드를 넣었습니다.' : '캔버스에 링크 카드를 넣었습니다.', { description: '카드를 두 번 누르면 수업 화면에서 바로 열립니다.' }); }}
             />
           ) : (
             <ModelViewerPane
               modelId={w.modelId!}
+              driveId={w.driveId}
+              modelName={w.title}
               onTitle={t => updateWindow(w.id, { title: t })}
               onSnapshot={url => { whiteboardRef.current?.addImageDataUrl(url); toast.success('지금 모습을 캔버스에 넣었습니다.'); }}
               registerCanvas={c => { if (c) modelCanvasRef.current.set(w.id, c); else modelCanvasRef.current.delete(w.id); }}
@@ -1235,7 +1460,7 @@ export default function App() {
       <AssetLibrary
         isOpen={assetsOpen}
         onClose={() => setAssetsOpen(false)}
-        onInsert={async a => { setAssetsOpen(false); await whiteboardRef.current?.addModelCard(a); openModelWindow(a.id, a.name); }}
+        onInsert={async a => { setAssetsOpen(false); await whiteboardRef.current?.addModelCard(a); openModelWindow(a.id, a.name, a.driveId); }}
       />
 
       {!isPresenting && (
@@ -1263,8 +1488,8 @@ export default function App() {
         <PresentationBar
           current={currentSceneIndex + 1}
           total={scenes.length}
-          onPrev={handlePrevSlide}
-          onNext={handleNextSlide}
+          onPrev={handlePrevStep}
+          onNext={handleNextStep}
           tool={activeTool}
           onTool={setActiveTool}
           color={color}
@@ -1318,17 +1543,30 @@ export default function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        canvasBackground={canvasBackground}
+        canvasBackground={effectiveBg}
         onCanvasBackgroundChange={handleCanvasBackgroundChange}
         isVertical={isVertical}
         onToggleOrientation={() => setIsVertical(v => !v)}
       />
 
+      <StudentCastModal
+        isOpen={castOpen}
+        onClose={() => setCastOpen(false)}
+        live={cast.status !== 'idle'}
+        status={cast.status}
+        code={cast.code}
+        url={cast.url}
+        count={cast.count}
+        onStart={startCast}
+        onStop={stopCast}
+      />
       <PdfImportModal
-        isOpen={isPdfImportModalOpen}
-        onClose={() => { setIsPdfImportModalOpen(false); setPendingPdfFile(null); }}
+        isOpen={!!pendingPdf}
+        onClose={closePdf}
         onImport={processPdf}
-        fileName={pendingPdfFile?.name}
+        fileName={pendingPdf?.name}
+        numPages={pendingPdf?.numPages ?? 1}
+        preview={pendingPdf?.preview}
       />
 
       <ConfirmDialog state={confirmState} onClose={() => setConfirmState(null)} />

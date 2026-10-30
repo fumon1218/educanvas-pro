@@ -1,25 +1,19 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Layout, Moon, Grid, Circle, Square, LogOut, Users } from 'lucide-react';
+import { X, Layout, LogOut, Users } from 'lucide-react';
 import { useAccess } from '@/src/components/Access/AccessGate';
 import { cn } from '@/src/lib/utils';
-import type { CanvasBackground } from '@/src/components/Canvas/Whiteboard';
+import type { CanvasBackground } from '@/src/lib/backgrounds';
+import { BackgroundPicker, type BackgroundScope } from './BackgroundPicker';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   canvasBackground: CanvasBackground;
-  onCanvasBackgroundChange: (bg: CanvasBackground) => void;
+  onCanvasBackgroundChange: (bg: CanvasBackground, scope: BackgroundScope) => void;
   isVertical: boolean;
   onToggleOrientation: () => void;
 }
-
-const BACKGROUNDS: { id: CanvasBackground; label: string; icon: React.ElementType }[] = [
-  { id: 'blank', label: '흰 화면', icon: Square },
-  { id: 'grid', label: '모눈', icon: Grid },
-  { id: 'dot', label: '점선 모눈', icon: Circle },
-  { id: 'dark', label: '칠판(어두운 화면)', icon: Moon },
-];
 
 const SHORTCUTS: [string, string][] = [
   ['Ctrl + Z / Ctrl + Y', '실행 취소 / 다시 실행'],
@@ -27,8 +21,9 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl + G', '그룹으로 묶기 (Shift: 풀기)'],
   ['Delete', '선택한 객체 삭제'],
   ['Space + 끌기', '화면 이동'],
-  ['마우스 휠 / 두 손가락', '확대·축소'],
-  ['PageDown / → , PageUp / ←', '다음 / 이전 슬라이드 (프레젠터 리모컨 가능)'],
+  ['마우스 휠 / 두 손가락 쓸기', '화면 위아래·좌우 이동'],
+  ['Ctrl + 휠 / 두 손가락 벌리기', '확대·축소'],
+  ['PageDown / → , PageUp / ←', '다음 / 이전 쪽·슬라이드 (프레젠터 리모컨 가능)'],
   ['Ctrl + S', '저장'],
 ];
 
@@ -80,22 +75,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             )}
 
             <div className="space-y-3">
-              <div className="text-sm font-semibold text-gray-700">캔버스 배경</div>
-              <div className="grid grid-cols-2 gap-3">
-                {BACKGROUNDS.map(b => (
-                  <button
-                    key={b.id}
-                    onClick={() => onCanvasBackgroundChange(b.id)}
-                    className={cn(
-                      'flex items-center gap-3 p-3 rounded-xl border transition-all',
-                      canvasBackground === b.id ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 hover:border-gray-300 text-gray-600',
-                    )}
-                  >
-                    <b.icon size={18} />
-                    <span className="font-medium text-sm">{b.label}</span>
-                  </button>
-                ))}
-              </div>
+              <div className="text-sm font-semibold text-gray-700">수업 배경</div>
+              <BackgroundPicker value={canvasBackground} onChange={onCanvasBackgroundChange} />
             </div>
 
             <div className="flex items-center justify-between">

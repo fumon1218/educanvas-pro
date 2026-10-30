@@ -2,7 +2,7 @@
  * 악보(Score)를 SVG 그림으로 그린다. 음표·쉼표·꼬리 모양은 옥쌤 악보 사보앱(glyphs.tsx)과 같은 그림을 쓴다.
  * 오선 간격은 20px이고 한 오선의 선은 y = 60, 80, 100, 120, 140 이다.
  */
-import { TPQ, durationTicks, pitchToY, type Score, type ScoreItem, type Pitch, type Clef } from './score';
+import { TPQ, durationTicks, pitchToY, expandRepeats, type Score, type ScoreItem, type Pitch, type Clef } from './score';
 
 const RX = 11, RY = 7.6, SLANT = -22;
 const INK = '#1e293b';
@@ -121,10 +121,13 @@ function clefGlyph(x: number, clef: Clef): string {
     : `<text x="${x}" y="148" font-size="170" font-family="${SYM_FONT}" fill="${INK}">𝄞</text>`;
 }
 
+export interface MeasureBox { m: number; x: number; y: number; w: number; h: number }
 export interface RenderedScore {
   svg: string;
   width: number;
   height: number;
+  /** 이 페이지에 있는 마디의 위치 (SVG 좌표) — 연주 따라가기 표시에 쓴다 */
+  boxes: MeasureBox[];
 }
 
 const measureTicks = (items: ScoreItem[]) => items.reduce((a, it) => a + durationTicks(it.duration), 0);
@@ -186,6 +189,7 @@ function renderLines(score: Score, L: Layout, lineFrom: number, lineTo: number, 
   }
 
   let body = '';
+  const boxes: MeasureBox[] = [];
   if (header) body += `<text x="${W / 2}" y="46" font-size="30" font-weight="700" text-anchor="middle" font-family="'Pretendard','Noto Sans KR','Malgun Gothic',sans-serif" fill="${INK}">${esc(header)}</text>`;
   if (header && score.tempo) body += `<text x="${MARGIN + 6}" y="${titleH - 6}" font-size="15" font-family="'Pretendard','Noto Sans KR',sans-serif" fill="#475569">♩ = ${Math.round(score.tempo)}</text>`;
   if (footer) body += `<text x="${W - MARGIN}" y="${H - 10}" font-size="14" text-anchor="end" font-family="'Pretendard','Noto Sans KR',sans-serif" fill="#94a3b8">${esc(footer)}</text>`;
@@ -225,6 +229,9 @@ function renderLines(score: Score, L: Layout, lineFrom: number, lineTo: number, 
     const mx: number[] = [x0 + headerW];
     fullW.forEach((w, i) => mx.push(mx[i] + w * unit));
     const lineEnd = mx[mx.length - 1];
+    for (let m = m0; m < m1; m++) {
+      boxes.push({ m, x: mx[m - m0], y: sysTop + 36, w: mx[m - m0 + 1] - mx[m - m0], h: (parts.length - 1) * (STAFF_H + STAFF_GAP) + 128 });
+    }
 
     parts.forEach((part, pi) => {
       const top = sysTop + pi * (STAFF_H + STAFF_GAP);
@@ -283,7 +290,7 @@ function renderLines(score: Score, L: Layout, lineFrom: number, lineTo: number, 
   }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${body}</svg>`;
-  return { svg, width: W, height: H };
+  return { svg, width: W, height: H, boxes };
 }
 
 /** 악보 전체를 한 장으로 */
@@ -305,4 +312,24 @@ export function renderScorePages(score: Score, opts: { title?: string; perLine?:
     pages.push(renderLines(score, L, from, to, i === 0 ? opts.title ?? null : null, nPages > 1 ? `${opts.title ? opts.title + ' · ' : ''}${i + 1} / ${nPages}` : null));
   }
   return pages;
+}
+
+/** 연주 시간(초, 원래 빠르기) → 마디 번호. 도돌이표를 펼친 순서대로 */
+export function measureTimeline(score: Score): { t: number; m: number }[] {
+  const part = score.parts.find(p => !p.percussion && p.measures.length > 0);
+  if (!part) return [];
+  const spt = 60 / (score.tempo || 100) / TPQ;
+  const out: { t: number; m: number }[] = [];
+  let tick = 0;
+  for (const meas of expandRepeats(part)) {
+    out.push({ t: tick * spt, m: part.measures.indexOf(meas) });
+    tick += meas.items.reduce((a, it) => a + durationTicks(it.duration), 0);
+  }
+  return out;
+}
+
+export function measureAt(timeline: { t: number; m: number }[], sec: number): number {
+  let lo = 0, hi = timeline.length - 1, ans = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (timeline[mid].t <= sec + 1e-6) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+  return ans < 0 ? (timeline[0]?.m ?? -1) : timeline[ans].m;
 }

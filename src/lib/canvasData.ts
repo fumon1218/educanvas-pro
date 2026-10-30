@@ -1,7 +1,7 @@
 import * as fabric from 'fabric';
 
 /** 캔버스 직렬화 시 함께 저장할 사용자 정의 속성 */
-export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url', 'isModel', 'modelId', 'modelName', 'isScore', 'scoreData', 'scoreTitle'];
+export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url', 'clipStart', 'clipEnd', 'isModel', 'modelId', 'modelName', 'driveId', 'isScore', 'scoreData', 'scoreTitle', 'scoreKey', 'scoreBoxes', 'pageNo'];
 
 /** 세션 동안 살아 있는 동영상 요소 (blob URL → video element) */
 export const videoRegistry = new Map<string, HTMLVideoElement>();
@@ -158,6 +158,7 @@ export async function createImageScene(dataUrl: string, width: number, height: n
     cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false,
     selectable: false, evented: false,
     lockMovementX: true, lockMovementY: true, lockRotation: true, lockScalingX: true, lockScalingY: true,
+    shadow: new fabric.Shadow({ color: 'rgba(15,23,42,0.22)', blur: 22, offsetX: 0, offsetY: 6 }),
   });
   (img as any).id = newId();
   (img as any).locked = true;
@@ -169,8 +170,36 @@ export async function createImageScene(dataUrl: string, width: number, height: n
   return out;
 }
 
+/** PDF 여러 쪽을 한 슬라이드에 위에서 아래로 이어 붙인 장면 (PageDown으로 한 쪽씩 넘긴다) */
+export async function createStackedPdfScene(pages: string[], firstPageNo: number, width: number): Promise<string> {
+  const el = document.createElement('canvas');
+  const sc = new fabric.StaticCanvas(el, { width, height: 800, enableRetinaScaling: false });
+  const pageW = Math.max(400, width - 100);
+  let y = 40;
+  for (let i = 0; i < pages.length; i++) {
+    const img = await fabric.FabricImage.fromURL(pages[i]);
+    img.scale(pageW / img.width);
+    img.set({
+      originX: 'left', originY: 'top', left: (width - pageW) / 2, top: y,
+      selectable: false, evented: false,
+      lockMovementX: true, lockMovementY: true, lockRotation: true, lockScalingX: true, lockScalingY: true,
+      cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false,
+      shadow: new fabric.Shadow({ color: 'rgba(15,23,42,0.22)', blur: 22, offsetX: 0, offsetY: 6 }),
+    });
+    (img as any).id = newId();
+    (img as any).locked = true;
+    (img as any).isBackground = true;
+    (img as any).pageNo = firstPageNo + i;
+    sc.add(img);
+    y += img.getScaledHeight() + 32;
+  }
+  const out = serializeCanvas(sc);
+  sc.dispose();
+  return out;
+}
+
 /** 악보 한 페이지를 화면 가운데에 놓은 장면 데이터 (선택하면 연주 막대가 나타난다) */
-export async function createScoreScene(svg: string, scoreData: string, title: string, width: number, height: number): Promise<string> {
+export async function createScoreScene(svg: string, scoreData: string, title: string, width: number, height: number, extra: { scoreKey?: string; scoreBoxes?: string } = {}): Promise<string> {
   const el = document.createElement('canvas');
   const sc = new fabric.StaticCanvas(el, { width, height, enableRetinaScaling: false });
   const img = await fabric.FabricImage.fromURL('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
@@ -180,6 +209,8 @@ export async function createScoreScene(svg: string, scoreData: string, title: st
   (img as any).isScore = true;
   (img as any).scoreData = scoreData;
   (img as any).scoreTitle = title;
+  if (extra.scoreKey) (img as any).scoreKey = extra.scoreKey;
+  if (extra.scoreBoxes) (img as any).scoreBoxes = extra.scoreBoxes;
   sc.add(img);
   sc.centerObject(img);
   const out = serializeCanvas(sc);
