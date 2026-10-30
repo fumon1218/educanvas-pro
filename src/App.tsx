@@ -2,11 +2,13 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type * as fabric from 'fabric';
 import { Whiteboard, WhiteboardHandle, ToolType, CanvasBackground, MediaSelection, CanvasChangeInfo, coordOrigin } from './components/Canvas/Whiteboard';
 import { isBackgroundId, isDarkBackground, backgroundColor } from './lib/backgrounds';
-import { StudentCaster, makeCastCode, castUrl, type CastView } from './lib/studentCast';
+import { StudentCaster, makeCastCode, castUrl, type CastView, type Poll, type StudentState } from './lib/studentCast';
+import { StudentResponsePanel } from './components/Cast/StudentResponsePanel';
 import { StudentCastModal } from './components/Cast/StudentCastModal';
 import { Toolbar } from './components/UI/Toolbar';
 import { MediaController } from './components/UI/MediaController';
 import { ScoreDock } from './components/UI/ScoreDock';
+import { PageIndicator, type PageInfo } from './components/UI/PageIndicator';
 import { measureAt as measureAtSec } from './music/renderScore';
 import { LayerPanel } from './components/UI/LayerPanel';
 import { TopNavBar } from './components/UI/TopNavBar';
@@ -48,7 +50,8 @@ import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { newId, normalizeSceneData, renderSceneImage, createImageScene, createScoreScene, createStackedPdfScene } from './lib/canvasData';
-import { saveProject, loadProject, isValidProject, downloadProjectFile, StoredProject } from './lib/projectStore';
+import { saveProject, loadProject, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
+import { formatBytes } from './lib/assetStore';
 
 interface Scene {
   id: string;
@@ -594,6 +597,24 @@ export default function App() {
     }
   }, [applyProject]);
 
+  /** 수업 파일 내보내기: 슬라이드에 쓴 3D 모델과 이름표도 함께 담는다 */
+  const handleExportFile = useCallback(async () => {
+    const base = buildProject();
+    const id = toast.loading('수업 파일을 만드는 중…');
+    try {
+      const { project, count, bytes, missing } = await packModels(base);
+      downloadProjectFile(project);
+      toast.success('수업 파일을 내보냈습니다.', {
+        id,
+        description: count ? `3D 모델 ${count}개(${formatBytes(bytes)})와 이름표가 함께 들어 있습니다.${missing ? ` 이 컴퓨터에 없는 모델 ${missing}개는 빠졌습니다.` : ''}` : undefined,
+      });
+    } catch (err) {
+      console.error(err);
+      downloadProjectFile(base);
+      toast.success('수업 파일을 내보냈습니다.', { id, description: '3D 모델은 담지 못했습니다.' });
+    }
+  }, [buildProject]);
+
   const handleImportFile = useCallback(async (file: File) => {
     try {
       const p = JSON.parse(await file.text());
@@ -602,7 +623,17 @@ export default function App() {
         title: `'${p.name}' 파일을 열까요?`,
         message: '지금 화면의 내용은 바뀝니다. 필요하면 먼저 저장해 주세요.',
         confirmLabel: '열기',
-        onConfirm: () => { applyProject(p, { publish: true }); dirtyRef.current = true; toast.success('파일을 열었습니다.'); },
+        onConfirm: async () => {
+          let added = 0;
+          if (p.assets?.models?.length) {
+            const id = toast.loading('수업 파일의 3D 모델을 자산함에 넣는 중…');
+            try { added = await unpackModels(p); } catch (err) { console.error(err); }
+            toast.dismiss(id);
+          }
+          applyProject(p, { publish: true });
+          dirtyRef.current = true;
+          toast.success('파일을 열었습니다.', added ? { description: `3D 모델 ${added}개를 이 컴퓨터의 자산함에 넣었습니다.` } : undefined);
+        },
       });
     } catch {
       toast.error('옥쌤보드 수업 파일이 아닙니다.', { description: '[파일로 내보내기]로 만든 .json 파일을 선택해 주세요.' });
@@ -1051,6 +1082,8 @@ export default function App() {
   const [castOpen, setCastOpen] = useState(false);
   const [cast, setCast] = useState<{ status: 'idle' | 'connecting' | 'live' | 'error'; code: string | null; url: string | null; count: number }>({ status: 'idle', code: null, url: null, count: 0 });
   const casterRef = useRef<StudentCaster | null>(null);
+  const [castStudents, setCastStudents] = useState<StudentState[]>([]);
+  const [castPoll, setCastPoll] = useState<Poll | null>(null);
   const castSentRef = useRef<{ id: string; data: string | null; bg: string } | null>(null);
   const castViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const castLaserAt = useRef(0);
@@ -1083,6 +1116,16 @@ export default function App() {
     const caster = new StudentCaster(code);
     caster.onStatus = st => setCast(c => ({ ...c, status: st === 'live' ? 'live' : st }));
     caster.onCount = n => setCast(c => ({ ...c, count: n }));
+    caster.onStudents = list => {
+      setCastStudents(prev => {
+        // 새로 손든 학생이 있으면 알려 준다
+        const before = new Set(prev.filter(s => s.hand).map(s => s.sid));
+        list.filter(s => s.hand && !before.has(s.sid)).forEach(s => toast(`✋ ${s.name} 학생이 손을 들었습니다.`, { duration: 2500 }));
+        return list;
+      });
+    };
+    setCastStudents([]);
+    setCastPoll(null);
     casterRef.current = caster;
     castSentRef.current = null;
     setCast({ status: 'connecting', code, url: castUrl(code), count: 0 });
@@ -1095,6 +1138,8 @@ export default function App() {
     casterRef.current?.stop();
     casterRef.current = null;
     setCast({ status: 'idle', code: null, url: null, count: 0 });
+    setCastStudents([]);
+    setCastPoll(null);
     toast.success('학생 화면 보내기를 끝냈습니다.', { duration: 1500 });
   }, []);
 
@@ -1106,13 +1151,29 @@ export default function App() {
   }, [cast.status, pushCastScene]);
   useEffect(() => () => casterRef.current?.stop(), []);
 
+  const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
+  const pageInfoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleViewChange = useCallback(() => {
+    if (!pageInfoTimer.current) {
+      pageInfoTimer.current = setTimeout(() => {
+        pageInfoTimer.current = null;
+        const info = whiteboardRef.current?.getPageInfo() ?? null;
+        setPageInfo(prev => (prev && info && prev.index === info.index && prev.total === info.total && prev.pageNo === info.pageNo ? prev : info));
+      }, 150);
+    }
     if (!casterRef.current || castViewTimer.current) return;
     castViewTimer.current = setTimeout(() => {
       castViewTimer.current = null;
       casterRef.current?.send({ type: 'view', view: currentView() });
     }, 200);
   }, [currentView]);
+
+  // 슬라이드를 바꾸면 쪽 표시를 다시 잰다 (화면 위치가 같아 바뀜 알림이 없을 수 있음)
+  useEffect(() => {
+    const t1 = setTimeout(handleViewChange, 300);
+    const t2 = setTimeout(handleViewChange, 900);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [activeSceneId, sceneRevision, handleViewChange]);
 
   const handleLaser = useCallback((x: number, y: number) => {
     if (!casterRef.current) return;
@@ -1293,7 +1354,7 @@ export default function App() {
         onRenameProject={name => { setProjectName(name); dirtyRef.current = true; }}
         onSave={() => saveToBrowser(true)}
         onLoad={handleLoadFromBrowser}
-        onExportFile={() => { downloadProjectFile(buildProject()); toast.success('수업 파일을 내보냈습니다.'); }}
+        onExportFile={handleExportFile}
         onImportFile={() => projectFileInputRef.current?.click()}
         onExportPDF={() => handleExportPDF('all')}
         onExportCurrentPDF={() => handleExportPDF('current')}
@@ -1350,6 +1411,7 @@ export default function App() {
           sceneRevision={sceneRevision}
           onCanvasChange={handleCanvasChange}
           onViewChange={handleViewChange}
+          onMagnifyDone={() => { setActiveTool('pen'); toast.success('확대 사본을 옆에 놓았습니다.', { description: '펜으로 바로 판서할 수 있습니다. 선택 도구로 크기·위치를 바꿀 수 있습니다.', duration: 2500 }); }}
           onLaser={handleLaser}
           onSelectionChange={setMediaSelection}
           onZoomChange={setZoomLevel}
@@ -1401,6 +1463,24 @@ export default function App() {
       />
       </>)}
 
+      {cast.status !== 'idle' && (
+        <StudentResponsePanel
+          students={castStudents}
+          connected={cast.count}
+          poll={castPoll}
+          onPoll={p => { setCastPoll(p); casterRef.current?.setPoll(p); }}
+          onLower={sid => casterRef.current?.lowerHands(sid)}
+          className={isPresenting ? 'top-4 right-4' : 'top-[156px] right-6'}
+        />
+      )}
+      {pageInfo && (
+        <PageIndicator
+          info={pageInfo}
+          onStep={dir => { whiteboardRef.current?.stepPage(dir); }}
+          onGo={n => !!whiteboardRef.current?.goToPageNo(n)}
+          className={isPresenting ? 'top-4 left-4' : isVertical ? 'top-[92px] left-[100px] lg:left-[172px]' : 'top-[92px] left-7'}
+        />
+      )}
       {activeScore && (
         <ScoreDock
           scoreData={activeScore.data}

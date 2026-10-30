@@ -1,7 +1,7 @@
 {
   "name": "okssam-board",
   "private": true,
-  "version": "0.6.1",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -40,7 +40,8 @@
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vite-plugin-pwa": "^0.21.2"
   },
   "description": "옥쌤보드 - 선생님을 위한 강의용 판서 앱"
 }

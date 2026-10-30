@@ -10,7 +10,19 @@ export type CastMessage =
   | { type: 'scene'; sceneId: string; index: number; total: number; name: string; data: string | null; bg: string; origin: { x: number; y: number }; view: CastView }
   | { type: 'view'; view: CastView }
   | { type: 'laser'; x: number; y: number }
+  | { type: 'poll'; poll: Poll | null }
   | { type: 'end' };
+
+/** 선생님이 묻는 것: O/X 또는 번호 고르기 */
+export interface Poll { id: string; kind: 'ox' | 'choice'; n?: number }
+
+/** 학생이 보내는 반응 */
+export type StudentMessage =
+  | { type: 'hello'; sid: string; name: string }
+  | { type: 'hand'; sid: string; name: string; up: boolean }
+  | { type: 'answer'; sid: string; name: string; pollId: string; value: string };
+
+export interface StudentState { sid: string; name: string; hand: boolean; handAt: number; answer?: { pollId: string; value: string } }
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -42,6 +54,11 @@ export class StudentCaster {
   private peer: Peer | null = null;
   private conns: DataConnection[] = [];
   private last: Extract<CastMessage, { type: 'scene' }> | null = null;
+  private poll: Poll | null = null;
+  /** 학생 기기 연결 → 학생 번호 */
+  private sidOf = new Map<DataConnection, string>();
+  students = new Map<string, StudentState>();
+  onStudents: (list: StudentState[]) => void = () => {};
   onCount: (n: number) => void = () => {};
   onStatus: (s: 'connecting' | 'live' | 'error', detail?: string) => void = () => {};
 
@@ -57,14 +74,19 @@ export class StudentCaster {
         this.conns.push(conn);
         this.onCount(this.conns.length);
         if (this.last) this.safeSend(conn, this.last);
+        this.safeSend(conn, { type: 'poll', poll: this.poll });
       });
       const drop = () => {
         this.conns = this.conns.filter(c => c !== conn);
         this.onCount(this.conns.length);
+        const sid = this.sidOf.get(conn);
+        this.sidOf.delete(conn);
+        if (sid && ![...this.sidOf.values()].includes(sid)) { this.students.delete(sid); this.emitStudents(); }
       };
       conn.on('close', drop);
       conn.on('error', drop);
-      // 학생 쪽에서 오는 내용은 받지 않는다 (읽기 전용)
+      // 학생 쪽에서는 손들기·답만 받는다 (화면은 바꿀 수 없음)
+      conn.on('data', d => this.onStudentData(conn, d as StudentMessage));
     });
     peer.on('disconnected', () => { try { peer.reconnect(); } catch { /* 무시 */ } });
     peer.on('error', err => this.onStatus('error', (err as any)?.type));
@@ -80,6 +102,33 @@ export class StudentCaster {
     this.conns.forEach(c => this.safeSend(c, msg));
   }
 
+  private onStudentData(conn: DataConnection, m: StudentMessage) {
+    if (!m || typeof m !== 'object' || typeof (m as any).sid !== 'string') return;
+    const sid = m.sid.slice(0, 40);
+    const name = String((m as any).name || '').trim().slice(0, 20) || '학생';
+    this.sidOf.set(conn, sid);
+    const st = this.students.get(sid) ?? { sid, name, hand: false, handAt: 0 };
+    st.name = name;
+    if (m.type === 'hand') { st.hand = !!m.up; st.handAt = Date.now(); }
+    if (m.type === 'answer' && this.poll && m.pollId === this.poll.id) st.answer = { pollId: m.pollId, value: String(m.value).slice(0, 4) };
+    this.students.set(sid, st);
+    this.emitStudents();
+  }
+
+  private emitStudents() { this.onStudents([...this.students.values()]); }
+
+  setPoll(poll: Poll | null) {
+    this.poll = poll;
+    this.students.forEach(s => { delete s.answer; });
+    this.conns.forEach(c => this.safeSend(c, { type: 'poll', poll }));
+    this.emitStudents();
+  }
+
+  lowerHands(sid?: string) {
+    this.students.forEach(s => { if (!sid || s.sid === sid) s.hand = false; });
+    this.emitStudents();
+  }
+
   get count() { return this.conns.length; }
 
   stop() {
@@ -93,8 +142,11 @@ export class StudentCaster {
 export function watchCast(code: string, handlers: {
   onMessage: (m: CastMessage) => void;
   onStatus: (s: 'connecting' | 'live' | 'waiting' | 'ended' | 'error') => void;
+  /** 연결될 때마다 처음 보낼 인사 (이름) */
+  hello?: () => StudentMessage;
 }) {
   let peer: Peer | null = null;
+  let conn: DataConnection | null = null;
   let closed = false;
   let ended = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
@@ -104,14 +156,15 @@ export function watchCast(code: string, handlers: {
     peer?.destroy();
     peer = new Peer({ debug: 1, config: { iceServers: ICE_SERVERS } });
     peer.on('open', () => {
-      const conn = peer!.connect(CAST_PREFIX + code, { reliable: true });
-      conn.on('open', () => handlers.onStatus('live'));
-      conn.on('data', d => {
+      const c = peer!.connect(CAST_PREFIX + code, { reliable: true });
+      conn = c;
+      c.on('open', () => { handlers.onStatus('live'); const h = handlers.hello?.(); if (h) try { c.send(h); } catch { /* 무시 */ } });
+      c.on('data', d => {
         const m = d as CastMessage;
         if (m?.type === 'end') { ended = true; handlers.onStatus('ended'); return; }
         handlers.onMessage(m);
       });
-      conn.on('close', () => { if (!closed && !ended) { handlers.onStatus('waiting'); retry = setTimeout(connect, 4000); } });
+      c.on('close', () => { if (!closed && !ended) { handlers.onStatus('waiting'); retry = setTimeout(connect, 4000); } });
     });
     peer.on('error', err => {
       if (ended) return;
@@ -123,5 +176,8 @@ export function watchCast(code: string, handlers: {
     });
   };
   connect();
-  return () => { closed = true; clearTimeout(retry); peer?.destroy(); };
+  return {
+    stop: () => { closed = true; clearTimeout(retry); peer?.destroy(); },
+    send: (m: StudentMessage) => { try { if (conn?.open) conn.send(m); } catch { /* 무시 */ } },
+  };
 }

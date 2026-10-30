@@ -7,6 +7,8 @@ import { glass } from './BottomNavBar';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { BackgroundPicker, type BackgroundScope } from './BackgroundPicker';
+import { isInstalled, promptInstall } from '@/src/lib/install';
+import { toast } from 'sonner';
 import type { CanvasBackground } from '@/src/lib/backgrounds';
 
 interface TopNavBarProps {
@@ -157,6 +159,9 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
                 <MenuItem icon={FileText} label="PDF로 내보내기 (현재 슬라이드)" onClick={run(onExportCurrentPDF)} />
                 <div className="h-px bg-slate-100 my-1" />
                 <MenuItem icon={LayoutTemplate} label="도구 막대 위치 바꾸기" onClick={run(onToggleLayout)} />
+                {!isInstalled() && <MenuItem icon={Download} label="앱으로 설치하기" hint="인터넷 없이도 열림" onClick={run(async () => {
+                  if (!(await promptInstall())) toast.info('이 브라우저에서는 메뉴로 설치합니다.', { description: '아이패드·아이폰 사파리: 공유 버튼 → [홈 화면에 추가]. 크롬·엣지: 주소창 오른쪽의 설치 아이콘.', duration: 8000 });
+                })} />}
               </motion.div>
             )}
           </AnimatePresence>

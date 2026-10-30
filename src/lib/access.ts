@@ -24,12 +24,20 @@ export async function checkAccess(user: User): Promise<AccessRole> {
   const email = normalizeEmail(user.email || '');
   if (!email || !user.emailVerified) return 'denied';
   if (email === ADMIN_EMAIL) return 'admin';
+  const cacheKey = `okssam_access:${email}`;
   try {
     const snap = await getDoc(doc(db, 'allowedUsers', email));
-    return snap.exists() ? 'member' : 'denied';
+    const role: AccessRole = snap.exists() ? 'member' : 'denied';
+    try { if (role === 'member') localStorage.setItem(cacheKey, String(Date.now())); else localStorage.removeItem(cacheKey); } catch { /* 무시 */ }
+    return role;
   } catch (err: any) {
     // 권한 없음(permission-denied)도 '허락되지 않음'으로 처리
     if (err?.code === 'permission-denied') return 'denied';
+    // 인터넷이 끊긴 교실: 최근 30일 안에 허락을 확인한 계정이면 그대로 쓰게 한다
+    try {
+      const at = Number(localStorage.getItem(cacheKey) || 0);
+      if (at && Date.now() - at < 30 * 24 * 3600 * 1000) return 'member';
+    } catch { /* 무시 */ }
     throw err;
   }
 }

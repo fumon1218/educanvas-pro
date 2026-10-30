@@ -21,6 +21,7 @@
 | fix-webm-duration | 1.0.6 | MIT | 녹화 영상 길이 정보 보정 |
 | three (three.js, Draco·Basis 디코더 포함) | 0.170.0 | MIT | 3D 모델 보기 |
 | qrcode | 1.5.4 | MIT | 학생 화면 QR 코드 |
+| vite-plugin-pwa (Workbox 포함) | 0.21.2 | MIT | 설치형 앱·오프라인 |
 | MIDI.js Soundfonts (gleitz, CDN) | — | MIT (음원: FluidR3_GM, CC BY 3.0) | 악보 연주 악기 소리 |
 | Pretendard (글꼴, CDN) | 1.3.9 | SIL Open Font License 1.1 | 글꼴 |
 
