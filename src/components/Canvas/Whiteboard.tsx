@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 
 export type ToolType =
   | 'pen' | 'eraser' | 'laser' | 'select' | 'lasso' | 'pencil' | 'fountain' | 'ballpoint'
-  | 'dashed' | 'bucket' | 'highlighter' | 'pan' | 'eyedropper';
+  | 'dashed' | 'bucket' | 'highlighter' | 'pan' | 'eyedropper' | 'magnify';
 
 import { drawBackground, isDarkBackground, backgroundColor, type CanvasBackground } from '@/src/lib/backgrounds';
 export type { CanvasBackground } from '@/src/lib/backgrounds';
@@ -65,6 +65,8 @@ interface WhiteboardProps {
   onLaser?: (x: number, y: number) => void;
   /** 화면을 옮기거나 확대했을 때 */
   onViewChange?: () => void;
+  /** 확대 사본을 만든 뒤 (펜으로 바꾸기 등) */
+  onMagnifyDone?: () => void;
   onColorPicked?: (color: string) => void;
   onDrawingStateChange?: (isDrawing: boolean) => void;
   onRequestTool?: (tool: ToolType) => void;
@@ -89,6 +91,10 @@ export interface WhiteboardHandle {
   fitToContent: () => void;
   /** 한 슬라이드에 이어 붙인 PDF 쪽을 넘긴다. 더 넘길 쪽이 없으면 false */
   stepPage: (dir: 1 | -1) => boolean;
+  /** 이어 붙인 PDF 쪽 정보 (없으면 null) */
+  getPageInfo: () => { index: number; total: number; pageNo: number; first: number; last: number } | null;
+  /** PDF 쪽 번호로 이동 */
+  goToPageNo: (n: number) => boolean;
   getLaserCanvas: () => HTMLCanvasElement | null;
   /** 녹화용: [판서 캔버스, 그리는 중인 선 캔버스, 레이저 캔버스] */
   getRecordLayers: () => (HTMLCanvasElement | null)[];
@@ -273,7 +279,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     canvas.selection = isSelect;
     canvas.skipTargetFind = !(isSelect || isBucket);
     canvas.defaultCursor =
-      t === 'pan' ? 'grab' : t === 'eraser' ? 'none' : isSelect ? 'default' : t === 'bucket' ? 'pointer' : 'crosshair';
+      t === 'pan' ? 'grab' : t === 'eraser' ? 'none' : isSelect ? 'default' : t === 'bucket' ? 'pointer' : t === 'magnify' ? 'zoom-in' : 'crosshair';
     canvas.forEachObject(obj => {
       if (isHelper(obj)) return;
       const locked = isLocked(obj);
@@ -457,6 +463,55 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     if (laserPointsRef.current.length > 120) laserPointsRef.current.shift();
     if (laserAnimRef.current == null) laserAnimRef.current = requestAnimationFrame(drawLaser);
   }, [drawLaser]);
+
+  // ---------- 영역 확대 사본 ----------
+  const magRef = useRef<{ x0: number; y0: number; rect: fabric.Rect } | null>(null);
+  const makeMagnified = useCallback(async (x: number, y: number, w: number, h: number) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const v = canvas.viewportTransform;
+    const z = v[0];
+    // 화면 좌표로 잘라 선명하게(긴 변 약 1600px) 그린다
+    const sw = w * z, sh = h * z;
+    const multiplier = Math.min(6, Math.max(1, 1600 / Math.max(sw, sh)));
+    const helpers = canvas.getObjects().filter(o => isHelper(o));
+    helpers.forEach(o => { o.visible = false; });
+    let url: string;
+    try {
+      url = canvas.toDataURL({ format: 'png', left: x * z + v[4], top: y * z + v[5], width: sw, height: sh, multiplier });
+    } finally {
+      helpers.forEach(o => { o.visible = true; });
+    }
+    // 흰 바탕을 깔아 투명한 부분이 비치지 않게
+    const base = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const c = document.createElement('canvas');
+    c.width = base.width; c.height = base.height;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = backgroundColor(backgroundRef.current);
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(base, 0, 0);
+    const img = await fabric.FabricImage.fromURL(c.toDataURL('image/jpeg', 0.92));
+    // 원래 크기의 2배(화면의 70%를 넘지 않게), 화면 안에서 영역 오른쪽 또는 가운데
+    const viewW = canvas.width / z, viewH = canvas.height / z;
+    const scaleWorld = Math.min(2 * w, viewW * 0.7) / img.width;
+    const finalScale = Math.min(scaleWorld, (viewH * 0.8) / img.height);
+    img.scale(finalScale);
+    const dw = img.getScaledWidth(), dh = img.getScaledHeight();
+    const vx0 = -v[4] / z, vy0 = -v[5] / z;
+    let left = x + w + 24 / z;
+    if (left + dw > vx0 + viewW - 12 / z) left = Math.max(vx0 + 12 / z, vx0 + (viewW - dw) / 2);
+    const top = Math.min(Math.max(vy0 + 12 / z, y + h / 2 - dh / 2), vy0 + viewH - dh - 12 / z);
+    img.set({
+      originX: 'left', originY: 'top', left, top,
+      stroke: '#6366f1', strokeWidth: 3, strokeUniform: true,
+      shadow: new fabric.Shadow({ color: 'rgba(15,23,42,0.28)', blur: 24, offsetX: 0, offsetY: 8 }),
+      cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false,
+    });
+    (img as any).id = newId();
+    canvas.add(img);
+    canvas.requestRenderAll();
+    propsRef.current.onMagnifyDone?.();
+  }, []);
 
   // ---------- 이어 붙인 PDF 쪽 ----------
   const stackedPages = useCallback(() => {
@@ -842,6 +897,20 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     hasLockedContent: () => !!fabricRef.current?.getObjects().some(o => !isHelper(o) && (isLocked(o) || (o as any).isBackground)),
     fitToContent: () => fitToContent(),
     stepPage,
+    getPageInfo: () => {
+      const pages = stackedPages();
+      if (pages.length < 2) return null;
+      const i = Math.max(0, currentPageIndex(pages));
+      const nos = pages.map(p => (p as any).pageNo as number);
+      return { index: i, total: pages.length, pageNo: nos[i], first: Math.min(...nos), last: Math.max(...nos) };
+    },
+    goToPageNo: (n: number) => {
+      const pages = stackedPages();
+      const target = pages.find(p => (p as any).pageNo === n);
+      if (!target) return false;
+      fitRect(target.getBoundingRect());
+      return true;
+    },
     getLaserCanvas: () => laserCanvasRef.current,
     getRecordLayers: () => {
       const c: any = fabricRef.current;
@@ -1095,6 +1164,18 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       propsRef.current.onDrawingStateChange?.(true);
       const t = toolRef.current;
       const e: any = opt.e;
+      if (t === 'magnify' && !pan.spaceDown) {
+        const p0 = canvas.getScenePoint(e);
+        const z = canvas.getZoom();
+        const rect = new fabric.Rect({
+          left: p0.x, top: p0.y, width: 1, height: 1, originX: 'left', originY: 'top',
+          fill: 'rgba(99,102,241,0.08)', stroke: '#6366f1', strokeWidth: 2 / z, strokeDashArray: [8 / z, 6 / z],
+          selectable: false, evented: false, excludeFromExport: true, objectCaching: false,
+        });
+        magRef.current = { x0: p0.x, y0: p0.y, rect };
+        canvas.add(rect);
+        return;
+      }
       if (pan.spaceDown || t === 'pan') {
         const { x, y } = clientXY(e);
         pan.dragging = true; pan.lastX = x; pan.lastY = y;
@@ -1140,6 +1221,13 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     canvas.on('mouse:move', opt => {
       const e: any = opt.e;
       const t = toolRef.current;
+      if (magRef.current) {
+        const p1 = canvas.getScenePoint(e);
+        const m = magRef.current;
+        m.rect.set({ left: Math.min(m.x0, p1.x), top: Math.min(m.y0, p1.y), width: Math.abs(p1.x - m.x0), height: Math.abs(p1.y - m.y0) });
+        canvas.requestRenderAll();
+        return;
+      }
       if (pan.dragging) {
         const { x, y } = clientXY(e);
         canvas.relativePan(new fabric.Point(x - pan.lastX, y - pan.lastY));
@@ -1162,6 +1250,16 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     });
 
     canvas.on('mouse:up', () => {
+      if (magRef.current) {
+        const { rect } = magRef.current;
+        magRef.current = null;
+        canvas.remove(rect);
+        isDrawingRef.current = false;
+        propsRef.current.onDrawingStateChange?.(false);
+        const w = rect.width, h = rect.height;
+        if (w * canvas.getZoom() > 12 && h * canvas.getZoom() > 12) void makeMagnified(rect.left, rect.top, w, h);
+        return;
+      }
       const wasPanning = pan.dragging;
       pan.dragging = false;
       if (wasPanning) canvas.setCursor(toolRef.current === 'pan' || pan.spaceDown ? 'grab' : 'default');

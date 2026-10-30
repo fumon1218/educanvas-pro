@@ -83,6 +83,9 @@ export class ScorePlayer {
   vols: number[] = [];
   /** play every part with this instrument (otherwise: the part's own program, else piano) */
   instrument: InstrumentName | null = null;
+  /** 옥쌤보드: 박자에 맞춰 똑딱 소리 (첫 박은 높게) */
+  metronome = false;
+  private clicks: OscillatorNode[] = [];
   onEnd: (() => void) | null = null;
 
   constructor(private engine: AudioEngine) {}
@@ -116,6 +119,7 @@ export class ScorePlayer {
     if (!pl) return;
     const my = ++this.session;
     this.engine.stopAll();
+    this.stopClicks();
     window.clearTimeout(this.endTimer);
     if (this.loop && (from >= this.loop.b - 0.05 || from < this.loop.a - 0.05)) from = this.loop.a;
     if (from >= pl.total - 0.05) from = 0;
@@ -146,6 +150,7 @@ export class ScorePlayer {
         velocity: Math.min(1, 0.8 * (this.vols[n.part] ?? 1)),
       });
     }
+    if (this.metronome) this.scheduleClicks(ctx, start, from, end, pl);
     this.startCtx = start;
     this.startPos = from;
     const looping = !!this.loop;
@@ -169,7 +174,36 @@ export class ScorePlayer {
     this.halt();
   }
 
+  private scheduleClicks(ctx: AudioContext, start: number, from: number, end: number, pl: Playable) {
+    const beatSec = (60 / (pl.tempo || 100)) * (4 / (pl.beatType || 4));
+    const beats = pl.beats || 4;
+    const offset = pl.pickupSec || 0;
+    let k = Math.ceil((from - offset) / beatSec - 1e-6);
+    for (let t = offset + k * beatSec; t < end - 1e-3 && this.clicks.length < 4000; k++, t = offset + k * beatSec) {
+      const when = start + (t - from) / this.speed;
+      const accent = ((k % beats) + beats) % beats === 0;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = accent ? 1760 : 1175;
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.exponentialRampToValueAtTime(accent ? 0.22 : 0.13, when + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + 0.05);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(when);
+      osc.stop(when + 0.06);
+      osc.onended = () => { this.clicks = this.clicks.filter(c => c !== osc); };
+      this.clicks.push(osc);
+    }
+  }
+
+  private stopClicks() {
+    this.clicks.forEach(c => { try { c.stop(); } catch { /* 이미 끝남 */ } });
+    this.clicks = [];
+  }
+
   private halt() {
+    this.stopClicks();
     this.session++;
     window.clearTimeout(this.endTimer);
     this.engine.stopAll();

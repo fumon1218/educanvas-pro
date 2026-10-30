@@ -22,7 +22,7 @@ export const ScoreDock: React.FC<{
     initial={{ opacity: 0, y: 16 }}
     animate={{ opacity: 1, y: 0 }}
     className={cn(
-      'absolute left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 pl-4 pr-2 py-2 rounded-2xl bg-white/90 backdrop-blur-xl ring-1 ring-slate-900/[0.06] shadow-[0_8px_30px_-6px_rgba(15,23,42,0.25)] max-w-[calc(100vw-32px)] overflow-x-auto',
+      'absolute left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 pl-4 pr-2 py-2 rounded-2xl bg-white/90 backdrop-blur-xl ring-1 ring-slate-900/[0.06] shadow-[0_8px_30px_-6px_rgba(15,23,42,0.25)] max-w-[calc(100vw-32px)]',
       presenting ? 'bottom-24' : 'bottom-[108px]',
     )}
     role="region"

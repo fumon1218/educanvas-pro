@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Pencil, Pen, Feather, Minus, Eraser, Zap, MousePointer2, Circle, Square, Triangle as TriangleIcon, Shapes, Type,
   PaintBucket, Highlighter, Upload, Link, Undo2, Redo2, Hand, Pipette, Scissors, Copy, ClipboardPaste,
-  Lasso, Slash, MoveRight, Pentagon, Globe, Box, Music, ImagePlus, MoreHorizontal, Palette,
+  Lasso, Slash, MoveRight, Pentagon, Globe, Box, Music, ImagePlus, MoreHorizontal, Palette, ZoomIn,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -127,6 +127,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     more: {
       title: '더 보기',
       items: [
+        { id: 'magnify', icon: ZoomIn, label: '영역 확대 사본', hint: '교과서 일부를 끌어 감싸면 크게 옆에 놓기' },
         { id: 'lasso', icon: Lasso, label: '올가미로 선택' },
         { id: 'bucket', icon: PaintBucket, label: '채우기' },
         { id: 'eyedrop', icon: Pipette, label: '스포이트', action: handleEyedropper },
@@ -188,7 +189,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <Row icon={Type} label="글자" onClick={() => { onAddText(); setMenu(null); }} />
         <Row icon={Zap} label="레이저" active={activeTool === 'laser'} onClick={() => { onToolSelect('laser'); setMenu(null); }} />
         <Row icon={ImagePlus} label="자료 넣기" caret active={menu === 'media'} onClick={() => toggle('media')} />
-        <Row icon={MoreHorizontal} label="더 보기" caret active={menu === 'more' || ['lasso', 'bucket', 'eyedropper'].includes(activeTool)} onClick={() => toggle('more')} />
+        <Row icon={MoreHorizontal} label="더 보기" caret active={menu === 'more' || ['lasso', 'bucket', 'eyedropper', 'magnify'].includes(activeTool)} onClick={() => toggle('more')} />
 
         <div className={cn('bg-slate-200/80', isVertical ? 'h-px mx-1 my-2' : 'w-px h-7 mx-1')} />
 

@@ -1,9 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
-import { Loader2, MonitorSmartphone, WifiOff } from 'lucide-react';
+import { Loader2, MonitorSmartphone, WifiOff, Hand, Check } from 'lucide-react';
 import { loadCanvasData } from '@/src/lib/canvasData';
 import { drawBackground, isBackgroundId, type CanvasBackground } from '@/src/lib/backgrounds';
-import { watchCast, type CastView } from '@/src/lib/studentCast';
+import { watchCast, type CastView, type Poll, type StudentMessage } from '@/src/lib/studentCast';
+import { cn } from '@/src/lib/utils';
+
+const NAME_KEY = 'okssam_student_name';
+const SID_KEY = 'okssam_student_id';
+const load = (k: string) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* 무시 */ } };
 
 /**
  * 학생 화면(읽기 전용). 로그인 없이 링크/QR로 들어와 선생님이 보여 주는 슬라이드를 본다.
@@ -20,6 +26,17 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
   const [hasScene, setHasScene] = useState(false);
   const [laser, setLaser] = useState<{ x: number; y: number; t: number } | null>(null);
   const loadToken = useRef(0);
+  const [name, setName] = useState(load(NAME_KEY));
+  const [nameDraft, setNameDraft] = useState(load(NAME_KEY));
+  const nameRef = useRef(name);
+  nameRef.current = name;
+  const sid = useRef(load(SID_KEY) || (() => { const v = Math.random().toString(36).slice(2, 12); save(SID_KEY, v); return v; })()).current;
+  const sendRef = useRef<(m: StudentMessage) => void>(() => {});
+  const [hand, setHand] = useState(false);
+  const [poll, setPoll] = useState<Poll | null>(null);
+  const [answer, setAnswer] = useState<string | null>(null);
+  const send = (m: StudentMessage) => sendRef.current(m);
+  const who = () => nameRef.current || '학생';
 
   const layout = () => {
     const fc = fcRef.current, box = boxRef.current, bg = bgRef.current;
@@ -47,9 +64,14 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
     const onResize = () => layout();
     window.addEventListener('resize', onResize);
     layout();
-    const stop = watchCast(code, {
+    const conn = watchCast(code, {
       onStatus: setStatus,
+      hello: () => ({ type: 'hello', sid, name: who() }),
       onMessage: async m => {
+        if (m.type === 'poll') {
+          setPoll(prev => { if (prev?.id !== m.poll?.id) setAnswer(null); return m.poll; });
+          return;
+        }
         if (m.type === 'scene') {
           stateRef.current = { bg: isBackgroundId(m.bg) ? m.bg : 'blank', origin: m.origin, view: m.view };
           setLabel(`${m.index + 1} / ${m.total}${m.name ? ` · ${m.name}` : ''}`);
@@ -67,7 +89,8 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
         }
       },
     });
-    return () => { stop(); window.removeEventListener('resize', onResize); fc.dispose(); };
+    sendRef.current = conn.send;
+    return () => { conn.stop(); window.removeEventListener('resize', onResize); fc.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
@@ -98,9 +121,46 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
           </div>
         )}
       </div>
-      <div className="h-10 px-4 flex items-center justify-between text-[13px] text-slate-500">
-        <span className="font-semibold text-slate-700">옥쌤보드 · 학생 화면</span>
-        <span className="tabular-nums truncate ml-3">{label}</span>
+      {/* 선생님 질문에 답하기 */}
+      {poll && status === 'live' && (
+        <div className="mx-2 sm:mx-3 mb-1 p-2 rounded-2xl bg-white ring-1 ring-indigo-200 shadow-sm flex items-center gap-2" role="group" aria-label="선생님 질문에 답하기">
+          <span className="px-2 text-[13px] font-semibold text-indigo-700 whitespace-nowrap">{answer ? '답을 보냈어요' : '선생님 질문'}</span>
+          <div className="flex-1 flex gap-2">
+            {(poll.kind === 'ox' ? ['O', 'X'] : Array.from({ length: poll.n || 4 }, (_, i) => String(i + 1))).map(v => (
+              <button
+                key={v}
+                onClick={() => { setAnswer(v); send({ type: 'answer', sid, name: who(), pollId: poll.id, value: v }); }}
+                className={cn('flex-1 h-14 rounded-xl text-2xl font-black transition-all', answer === v ? 'bg-indigo-600 text-white scale-[1.03]' : v === 'O' ? 'bg-sky-50 text-sky-600' : v === 'X' ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-700')}
+                aria-pressed={answer === v}
+                aria-label={`답 ${v}`}
+              >
+                {v === 'O' ? '⭕' : v === 'X' ? '❌' : v}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="h-12 px-3 flex items-center gap-2 text-[13px] text-slate-500">
+        {name ? (
+          <button onClick={() => { setNameDraft(name); setName(''); }} className="font-semibold text-slate-700 truncate max-w-[120px]" title="이름 바꾸기">{name}</button>
+        ) : (
+          <form
+            onSubmit={e => { e.preventDefault(); const v = nameDraft.trim().slice(0, 20); if (!v) return; setName(v); save(NAME_KEY, v); send({ type: 'hello', sid, name: v }); }}
+            className="flex items-center gap-1.5"
+          >
+            <input value={nameDraft} onChange={e => setNameDraft(e.target.value)} placeholder="내 이름" maxLength={20} className="w-28 h-8 px-2 rounded-lg bg-white ring-1 ring-slate-200 text-[13px]" aria-label="내 이름" />
+            <button type="submit" className="h-8 px-2.5 rounded-lg bg-slate-900 text-white text-[12px] font-semibold">확인</button>
+          </form>
+        )}
+        <button
+          onClick={() => { const v = !hand; setHand(v); send({ type: 'hand', sid, name: who(), up: v }); }}
+          disabled={status !== 'live'}
+          className={cn('flex items-center gap-1.5 h-9 px-3 rounded-xl font-semibold disabled:opacity-40', hand ? 'bg-amber-400 text-amber-950' : 'bg-white ring-1 ring-slate-200 text-slate-700')}
+          aria-pressed={hand}
+        >
+          {hand ? <Check size={16} /> : <Hand size={16} />}{hand ? '손 든 중' : '손들기'}
+        </button>
+        <span className="ml-auto tabular-nums truncate">{label}</span>
       </div>
     </div>
   );

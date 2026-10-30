@@ -4,6 +4,7 @@ import App from './App.tsx';
 import { AccessGate } from './components/Access/AccessGate';
 import { StudentView } from './components/Cast/StudentView';
 import './index.css';
+import './lib/install';
 
 // 예상하지 못한 오류는 화면을 덮지 않고 콘솔에만 남긴다.
 window.addEventListener('unhandledrejection', e => console.error('처리되지 않은 오류:', e.reason));
