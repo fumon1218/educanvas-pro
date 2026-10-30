@@ -12,7 +12,7 @@ if (typeof window !== 'undefined') {
 }
 
 export const canInstall = () => !!deferred;
-export const isInstalled = () => typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true);
+export const isInstalled = () => typeof window !== 'undefined' && (!!(window as any).okssamDesktop || window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true);
 export const onInstallChange = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f); }; };
 
 /** 설치 창을 띄운다. 띄울 수 없으면 false (사파리 등: 공유 → 홈 화면에 추가 안내) */
