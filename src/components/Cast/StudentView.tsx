@@ -85,7 +85,8 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
     <div className="fixed inset-0 bg-[#eef1f6] flex flex-col font-sans select-none">
       <div ref={boxRef} className="relative flex-1 m-2 sm:m-3 rounded-2xl overflow-hidden bg-white ring-1 ring-slate-900/[0.06] shadow-sm">
         <canvas ref={bgRef} className="absolute inset-0 w-full h-full" aria-hidden="true" />
-        <canvas ref={elRef} />
+        {/* 판서 층은 배경 무늬 위에 */}
+        <div className="absolute inset-0"><canvas ref={elRef} /></div>
         {laserPos && <span className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-red-500 shadow-[0_0_12px_4px_rgba(239,68,68,0.6)] pointer-events-none" style={laserPos} />}
         {(!hasScene || status !== 'live') && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/85 backdrop-blur-sm text-slate-600">
