@@ -19,6 +19,11 @@ export interface StoredProject {
   activeSceneId: string;
   canvasBackground: string;
   scenes: StoredScene[];
+  /** 수업 고유 번호 (드라이브 동기화) */
+  lessonId?: string;
+  /** 이 수업이 저장된 드라이브 파일과 그때의 수정 시각 */
+  driveFileId?: string;
+  driveModified?: string;
   /** 내보낸 파일에만: 함께 담은 3D 모델 */
   assets?: { models: PackedModel[] };
 }

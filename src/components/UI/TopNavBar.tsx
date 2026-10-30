@@ -44,7 +44,19 @@ interface TopNavBarProps {
   onOpenStudentCast: () => void;
   castCount?: number;
   castOn?: boolean;
+  driveState?: 'off' | 'synced' | 'saving' | 'pending' | 'need-auth' | 'error' | 'conflict';
+  onOpenLessons: () => void;
 }
+
+const DRIVE_TITLES: Record<string, string> = {
+  synced: '구글 드라이브에 저장됨 · 눌러서 내 수업 목록',
+  saving: '구글 드라이브에 저장하는 중…',
+  pending: '바뀐 내용을 곧 드라이브에 저장합니다',
+  'need-auth': '드라이브 연결이 끝났습니다 · 눌러서 다시 연결',
+  error: '드라이브에 저장하지 못했습니다 · 눌러서 확인',
+  conflict: '다른 기기에서 더 최근에 고친 수업입니다',
+};
+const DRIVE_LABELS: Record<string, string> = { synced: '드라이브', saving: '저장 중', pending: '저장 대기', 'need-auth': '다시 연결', error: '저장 오류', conflict: '확인 필요' };
 
 const MenuItem: React.FC<{ icon: React.ElementType; label: string; hint?: string; onClick: () => void }> = ({ icon: Icon, label, hint, onClick }) => (
   <button onClick={onClick} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left">
@@ -59,7 +71,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
   isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
   onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false, saveState = 'saved',
-  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false,
+  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false, driveState = 'off', onOpenLessons,
 }) => {
   const [bgOpen, setBgOpen] = useState(false);
   const bgRef = useRef<HTMLDivElement>(null);
@@ -150,7 +162,8 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
                 className="absolute z-50 top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] ring-1 ring-slate-900/[0.07] overflow-hidden py-1.5"
               >
                 <MenuItem icon={Save} label="저장" hint="Ctrl+S" onClick={run(onSave)} />
-                <MenuItem icon={FolderOpen} label="저장한 수업 불러오기" onClick={run(onLoad)} />
+                <MenuItem icon={Cloud} label="내 수업 (구글 드라이브)" hint="모든 기기" onClick={run(onOpenLessons)} />
+                <MenuItem icon={FolderOpen} label="이 브라우저에 저장한 수업" onClick={run(onLoad)} />
                 <div className="h-px bg-slate-100 my-1" />
                 <MenuItem icon={Download} label="파일로 내보내기 (.json)" onClick={run(onExportFile)} />
                 <MenuItem icon={Upload} label="파일 열기" onClick={run(onImportFile)} />
@@ -183,12 +196,16 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
               {projectName}
             </button>
           )}
-          <span
-            className={cn('shrink-0', saveState === 'error' ? 'text-red-400' : saveState === 'dirty' ? 'text-slate-300' : 'text-slate-400')}
-            title={saveState === 'saved' ? '이 브라우저에 저장됨' : saveState === 'dirty' ? '저장 대기 중 (곧 자동 저장)' : '저장하지 못했습니다'}
+          <button
+            onClick={onOpenLessons}
+            className={cn('shrink-0 flex items-center gap-1 h-8 px-2 rounded-lg hover:bg-slate-900/[0.05] text-[12px] font-medium',
+              driveState === 'synced' ? 'text-sky-600' : driveState === 'need-auth' || driveState === 'conflict' ? 'text-amber-600' : driveState === 'error' || saveState === 'error' ? 'text-red-500' : 'text-slate-400')}
+            title={DRIVE_TITLES[driveState] ?? (saveState === 'saved' ? '이 브라우저에 저장됨 · 눌러서 구글 드라이브 동기화 켜기' : saveState === 'dirty' ? '저장 대기 중 (곧 자동 저장)' : '저장하지 못했습니다')}
+            aria-label="내 수업 (저장 상태)"
           >
-            {saveState === 'error' ? <CloudOff size={17} /> : <Cloud size={17} />}
-          </span>
+            {driveState === 'saving' ? <Cloud size={17} className="animate-pulse" /> : saveState === 'error' || driveState === 'error' ? <CloudOff size={17} /> : <Cloud size={17} />}
+            {driveState !== 'off' && <span className="hidden xl:inline whitespace-nowrap">{DRIVE_LABELS[driveState]}</span>}
+          </button>
         </div>
 
         <div className="flex-1" />
