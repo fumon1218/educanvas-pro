@@ -1,5 +1,8 @@
 {
-  "name": "EduCanvas Pro",
-  "description": "Next-gen remote education tool with infinite canvas, scene-based recording, and AI-powered teaching assistance.",
-  "requestFramePermissions": ["camera", "microphone"]
+  "name": "옥쌤보드",
+  "description": "선생님을 위한 강의용 판서·화이트보드 앱 (무한 캔버스, 슬라이드, PDF 판서, 실시간 협업)",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
 }

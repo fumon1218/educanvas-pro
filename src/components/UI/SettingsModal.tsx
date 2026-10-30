@@ -1,164 +1,102 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Layout, Moon, Sun, Grid, Circle, Square, MonitorSpeaker } from 'lucide-react';
+import { X, Layout, Moon, Grid, Circle, Square } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import type { CanvasBackground } from '@/src/components/Canvas/Whiteboard';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  canvasBackground: 'blank' | 'grid' | 'dot' | 'dark';
-  onCanvasBackgroundChange: (bg: 'blank' | 'grid' | 'dot' | 'dark') => void;
+  canvasBackground: CanvasBackground;
+  onCanvasBackgroundChange: (bg: CanvasBackground) => void;
   isVertical: boolean;
   onToggleOrientation: () => void;
-  theme: 'light' | 'dark';
-  onToggleTheme: () => void;
-  recordSystemAudio: boolean;
-  onToggleRecordSystemAudio: () => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({
-  isOpen,
-  onClose,
-  canvasBackground,
-  onCanvasBackgroundChange,
-  isVertical,
-  onToggleOrientation,
-  theme,
-  onToggleTheme,
-  recordSystemAudio,
-  onToggleRecordSystemAudio,
-}) => {
-  if (!isOpen) return null;
+const BACKGROUNDS: { id: CanvasBackground; label: string; icon: React.ElementType }[] = [
+  { id: 'blank', label: '흰 화면', icon: Square },
+  { id: 'grid', label: '모눈', icon: Grid },
+  { id: 'dot', label: '점선 모눈', icon: Circle },
+  { id: 'dark', label: '칠판(어두운 화면)', icon: Moon },
+];
 
-  return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-[100] flex items-center justify-center">
+const SHORTCUTS: [string, string][] = [
+  ['Ctrl + Z / Ctrl + Y', '실행 취소 / 다시 실행'],
+  ['Ctrl + C / X / V', '복사 / 잘라내기 / 붙여넣기'],
+  ['Ctrl + G', '그룹으로 묶기 (Shift: 풀기)'],
+  ['Delete', '선택한 객체 삭제'],
+  ['Space + 끌기', '화면 이동'],
+  ['마우스 휠 / 두 손가락', '확대·축소'],
+  ['PageDown / → , PageUp / ←', '다음 / 이전 슬라이드 (프레젠터 리모컨 가능)'],
+  ['Ctrl + S', '저장'],
+];
+
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  isOpen, onClose, canvasBackground, onCanvasBackgroundChange, isVertical, onToggleOrientation,
+}) => (
+  <AnimatePresence>
+    {isOpen && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/20 backdrop-blur-sm" />
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-          className="absolute inset-0 bg-black/20 backdrop-blur-sm"
-        />
-        
-        <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-label="설정"
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden"
+          className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl border border-gray-200"
         >
           <div className="flex items-center justify-between p-6 border-b border-gray-100">
-            <h2 className="text-xl font-bold text-gray-800">Settings</h2>
-            <button
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-            >
-              <X size={20} />
-            </button>
+            <h2 className="text-xl font-bold text-gray-800">설정</h2>
+            <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full" aria-label="닫기"><X size={20} /></button>
           </div>
 
           <div className="p-6 space-y-8">
-            {/* Canvas Background */}
             <div className="space-y-3">
-              <label className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Canvas Background</label>
+              <div className="text-sm font-semibold text-gray-700">캔버스 배경</div>
               <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => onCanvasBackgroundChange('blank')}
-                  className={cn(
-                    "flex items-center gap-3 p-3 rounded-xl border transition-all",
-                    canvasBackground === 'blank' ? "border-purple-500 bg-purple-50 text-purple-700" : "border-gray-200 hover:border-gray-300 text-gray-600"
-                  )}
-                >
-                  <Square size={18} />
-                  <span className="font-medium text-sm">Blank</span>
-                </button>
-                <button
-                  onClick={() => onCanvasBackgroundChange('grid')}
-                  className={cn(
-                    "flex items-center gap-3 p-3 rounded-xl border transition-all",
-                    canvasBackground === 'grid' ? "border-purple-500 bg-purple-50 text-purple-700" : "border-gray-200 hover:border-gray-300 text-gray-600"
-                  )}
-                >
-                  <Grid size={18} />
-                  <span className="font-medium text-sm">Grid</span>
-                </button>
-                <button
-                  onClick={() => onCanvasBackgroundChange('dot')}
-                  className={cn(
-                    "flex items-center gap-3 p-3 rounded-xl border transition-all",
-                    canvasBackground === 'dot' ? "border-purple-500 bg-purple-50 text-purple-700" : "border-gray-200 hover:border-gray-300 text-gray-600"
-                  )}
-                >
-                  <Circle size={18} />
-                  <span className="font-medium text-sm">Dot</span>
-                </button>
-                <button
-                  onClick={() => onCanvasBackgroundChange('dark')}
-                  className={cn(
-                    "flex items-center gap-3 p-3 rounded-xl border transition-all",
-                    canvasBackground === 'dark' ? "border-purple-500 bg-purple-50 text-purple-700" : "border-gray-200 hover:border-gray-300 text-gray-600"
-                  )}
-                >
-                  <Moon size={18} />
-                  <span className="font-medium text-sm">Dark Board</span>
-                </button>
+                {BACKGROUNDS.map(b => (
+                  <button
+                    key={b.id}
+                    onClick={() => onCanvasBackgroundChange(b.id)}
+                    className={cn(
+                      'flex items-center gap-3 p-3 rounded-xl border transition-all',
+                      canvasBackground === b.id ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 hover:border-gray-300 text-gray-600',
+                    )}
+                  >
+                    <b.icon size={18} />
+                    <span className="font-medium text-sm">{b.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Toolbar Orientation */}
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <label className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Toolbar Layout</label>
-                <p className="text-xs text-gray-500">Switch between horizontal and vertical</p>
+                <div className="text-sm font-semibold text-gray-700">도구 막대 위치</div>
+                <p className="text-xs text-gray-500">왼쪽 세로 또는 아래쪽 가로</p>
               </div>
-              <button
-                onClick={onToggleOrientation}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium text-gray-700"
-              >
-                <Layout size={16} className={cn("transition-transform", isVertical ? "-rotate-90" : "")} />
-                {isVertical ? 'Vertical' : 'Horizontal'}
+              <button onClick={onToggleOrientation} className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700">
+                <Layout size={16} className={cn(isVertical && '-rotate-90')} />
+                {isVertical ? '세로' : '가로'}
               </button>
             </div>
 
-            {/* Theme */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <label className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Theme</label>
-                <p className="text-xs text-gray-500">App appearance</p>
-              </div>
-              <button
-                onClick={onToggleTheme}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium text-gray-700"
-              >
-                {theme === 'light' ? <Sun size={16} /> : <Moon size={16} />}
-                {theme === 'light' ? 'Light Mode' : 'Dark Mode'}
-              </button>
-            </div>
-
-            {/* Recording Sync */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <label className="text-sm font-semibold text-gray-700 uppercase tracking-wider">System Audio</label>
-                <p className="text-xs text-gray-500">Include system audio in recordings</p>
-              </div>
-              <button
-                onClick={onToggleRecordSystemAudio}
-                className={cn(
-                  "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                  recordSystemAudio ? "bg-purple-500" : "bg-gray-200"
-                )}
-              >
-                <span
-                  className={cn(
-                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                    recordSystemAudio ? "translate-x-6" : "translate-x-1"
-                  )}
-                />
-              </button>
+            <div className="space-y-2">
+              <div className="text-sm font-semibold text-gray-700">단축키</div>
+              <dl className="text-xs divide-y divide-gray-100 border border-gray-100 rounded-xl">
+                {SHORTCUTS.map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-4 px-3 py-2">
+                    <dt className="font-mono text-gray-600 whitespace-nowrap">{k}</dt>
+                    <dd className="text-gray-500 text-right">{v}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           </div>
         </motion.div>
       </div>
-    </AnimatePresence>
-  );
-};
+    )}
+  </AnimatePresence>
+);

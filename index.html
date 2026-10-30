@@ -1,27 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="description" content="옥쌤보드 - 선생님을 위한 강의용 판서·화이트보드 앱" />
+    <title>옥쌤보드</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" content="#4F46E5" />
+    <meta name="apple-mobile-web-app-title" content="옥쌤보드" />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
     <script>
       window.global = window;
-      window.process = { env: {} };
     </script>
   </head>
   <body>
     <div id="root"></div>
-    <script>
-      window.onerror = function (message, source, lineno, colno, error) {
-        document.body.innerHTML += '<div style="color:red; padding: 20px; background: #fee; position: fixed; top: 0; left: 0; right: 0; z-index: 9999;">' + 
-          '<b>Global Error:</b> ' + message + '<br/>' + source + ':' + lineno + '<br/><pre>' + (error && error.stack ? error.stack : '') + '</pre></div>';
-      };
-      window.addEventListener('unhandledrejection', function(event) {
-        document.body.innerHTML += '<div style="color:red; padding: 20px; background: #fee; position: fixed; top: 100px; left: 0; right: 0; z-index: 9999;">' + 
-          '<b>Unhandled Promise:</b> ' + event.reason + '</div>';
-      });
-    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

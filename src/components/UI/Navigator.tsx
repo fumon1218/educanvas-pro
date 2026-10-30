@@ -242,11 +242,11 @@ export const Navigator: React.FC<NavigatorProps> = ({ mainCanvas, isPinned, onTo
         >
           <div className="relative w-full h-full p-2 flex flex-col">
             <div className="flex justify-between items-center mb-1 px-1">
-              <span className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Navigator</span>
+              <span className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">미니맵</span>
               <button 
                 onClick={onTogglePin}
                 className={cn("p-1 rounded hover:bg-gray-200 transition-colors", isPinned ? "text-indigo-600" : "text-gray-400")}
-                title={isPinned ? "Unpin (Auto-hide)" : "Pin (Always show)"}
+                title={isPinned ? "고정 해제 (자동 숨김)" : "항상 보이기"}
               >
                 {isPinned ? <Pin size={12} /> : <PinOff size={12} />}
               </button>

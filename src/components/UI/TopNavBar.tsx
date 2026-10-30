@@ -1,171 +1,182 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Home, ArrowLeft, ChevronDown, Users, Share, MoreHorizontal, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Search, Sparkles, ArrowRight } from 'lucide-react';
+import {
+  ChevronDown, Users, Share, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Sparkles, ArrowRight,
+  Download, Upload, File as FileIcon,
+} from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TopNavBarProps {
-  onSave?: () => void;
-  onLoad?: () => void;
-  onExportPDF?: () => void;
-  onClearAll?: () => void;
-  onOpenSettings?: () => void;
-  onToggleLayout?: () => void;
-  onGenerate?: (query: string) => void;
-  onShare?: () => void;
-  onGoHome?: () => void;
-  onOpenMultiplayer?: () => void;
+  projectName: string;
+  onRenameProject: (name: string) => void;
+  onSave: () => void;
+  onLoad: () => void;
+  onExportFile: () => void;
+  onImportFile: () => void;
+  onExportPDF: () => void;
+  onExportCurrentPDF: () => void;
+  onClearAll: () => void;
+  onOpenSettings: () => void;
+  onToggleLayout: () => void;
+  onGenerate: (query: string) => void;
+  onShare: () => void;
+  onOpenMultiplayer: () => void;
   isGenerating?: boolean;
-  isZenMode?: boolean;
-  view?: 'home' | 'editor';
+  aiEnabled?: boolean;
+  isSharing?: boolean;
+  peerStatus?: 'disconnected' | 'connecting' | 'connected' | 'error';
+  peerCount?: number;
 }
 
-export const TopNavBar: React.FC<TopNavBarProps> = ({ 
-  onSave, 
-  onLoad, 
-  onExportPDF,
-  onClearAll,
-  onOpenSettings,
-  onToggleLayout,
-  onGenerate,
-  onShare,
-  onGoHome,
-  onOpenMultiplayer,
-  isGenerating = false,
-  isZenMode = false,
-  view = 'editor'
+const MenuItem: React.FC<{ icon: React.ElementType; label: string; hint?: string; onClick: () => void }> = ({ icon: Icon, label, hint, onClick }) => (
+  <button onClick={onClick} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left">
+    <Icon size={16} className="text-gray-500 shrink-0" />
+    <span className="flex-1">{label}</span>
+    {hint && <span className="text-[11px] text-gray-400">{hint}</span>}
+  </button>
+);
+
+export const TopNavBar: React.FC<TopNavBarProps> = ({
+  projectName, onRenameProject, onSave, onLoad, onExportFile, onImportFile, onExportPDF, onExportCurrentPDF,
+  onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
+  isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
 }) => {
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [query, setQuery] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(projectName);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => setNameDraft(projectName), [projectName]);
+
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsFileMenuOpen(false);
-      }
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setIsFileMenuOpen(false);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
   }, []);
 
-  return (
-    <div className={cn(
-      "absolute top-0 left-0 w-full z-50 flex flex-col pointer-events-none transition-all duration-400 opacity-100 translate-y-0"
-    )}>
-      {/* Layer 1: Main Nav */}
-      <div className="flex justify-between items-center h-16 px-4">
-        {/* Left */}
-        <div className="pointer-events-auto flex items-center gap-3">
-          <button 
-            onClick={onGoHome}
-            className={cn(
-              "p-2.5 bg-white/80 backdrop-blur-md border border-gray-200 rounded-full shadow-sm hover:shadow-md hover:bg-gray-50 transition-all text-gray-600",
-              view === 'home' && "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700"
-            )}
-            title="Home"
-          >
-            <Home size={20} />
-          </button>
+  // Ctrl+S 저장
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); onSave(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onSave]);
 
+  const run = (fn: () => void) => () => { fn(); setIsFileMenuOpen(false); };
+  const submit = () => {
+    if (!query.trim() || isGenerating) return;
+    onGenerate(query);
+    setQuery('');
+  };
+  const commitName = () => {
+    const v = nameDraft.trim();
+    if (v && v !== projectName) onRenameProject(v.slice(0, 60));
+    else setNameDraft(projectName);
+    setEditingName(false);
+  };
+
+  const pill = 'bg-white/90 backdrop-blur-md border border-gray-200 rounded-full shadow-sm hover:shadow-md transition-all';
+
+  return (
+    <div className="absolute top-0 left-0 w-full z-50 flex flex-col pointer-events-none">
+      <div className="flex justify-between items-center h-16 px-4 gap-3">
+        {/* 왼쪽: 파일 메뉴 + 수업 이름 */}
+        <div className="pointer-events-auto flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 pr-1 select-none" title="옥쌤보드">
+            <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="w-8 h-8 rounded-lg shadow-sm" />
+            <span className="hidden md:inline text-sm font-bold text-indigo-700 tracking-tight">옥쌤보드</span>
+          </div>
           <div className="relative" ref={menuRef}>
-            <button 
-              onClick={() => setIsFileMenuOpen(!isFileMenuOpen)}
-              className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-md border border-gray-200 rounded-full shadow-sm hover:shadow-md hover:bg-gray-50 transition-all group"
-            >
-              <span className="font-medium text-sm text-gray-700">File</span>
+            <button onClick={() => setIsFileMenuOpen(o => !o)} className={cn(pill, 'flex items-center gap-2 px-4 py-2 hover:bg-gray-50')} aria-haspopup="menu" aria-expanded={isFileMenuOpen}>
+              <FileIcon size={16} className="text-gray-500" />
+              <span className="font-medium text-sm text-gray-700">파일</span>
               <ChevronDown size={16} className="text-gray-500" />
             </button>
-
             <AnimatePresence>
               {isFileMenuOpen && (
                 <motion.div
-                  initial={{ opacity: 0, y: -10 }}
+                  role="menu"
+                  initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute z-50 top-full left-0 mt-2 w-48 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-gray-100 overflow-hidden py-1 pointer-events-auto"
+                  exit={{ opacity: 0, y: -8 }}
+                  className="absolute z-50 top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden py-1"
                 >
-                  <button 
-                    onClick={() => { onSave?.(); setIsFileMenuOpen(false); }}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left"
-                  >
-                    <Save size={16} className="text-gray-500" />
-                    Save Project
-                  </button>
-                  <button 
-                    onClick={() => { onLoad?.(); setIsFileMenuOpen(false); }}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left"
-                  >
-                    <FolderOpen size={16} className="text-gray-500" />
-                    Load Project
-                  </button>
+                  <MenuItem icon={Save} label="저장" hint="Ctrl+S" onClick={run(onSave)} />
+                  <MenuItem icon={FolderOpen} label="저장한 수업 불러오기" onClick={run(onLoad)} />
                   <div className="h-px bg-gray-100 my-1" />
-                  <button 
-                    onClick={() => { onExportPDF?.(); setIsFileMenuOpen(false); }}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left"
-                  >
-                    <FileText size={16} className="text-gray-500" />
-                    Export as PDF
-                  </button>
+                  <MenuItem icon={Download} label="파일로 내보내기 (.json)" onClick={run(onExportFile)} />
+                  <MenuItem icon={Upload} label="파일 열기" onClick={run(onImportFile)} />
+                  <div className="h-px bg-gray-100 my-1" />
+                  <MenuItem icon={FileText} label="PDF로 내보내기 (전체 슬라이드)" onClick={run(onExportPDF)} />
+                  <MenuItem icon={FileText} label="PDF로 내보내기 (현재 슬라이드)" onClick={run(onExportCurrentPDF)} />
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
+
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={e => setNameDraft(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={e => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameDraft(projectName); setEditingName(false); } }}
+              className="px-3 py-1.5 text-sm font-semibold text-gray-800 bg-white border border-indigo-300 rounded-lg outline-none ring-2 ring-indigo-100 w-48"
+              aria-label="수업 이름"
+            />
+          ) : (
+            <button onClick={() => setEditingName(true)} title="눌러서 수업 이름 바꾸기" className="px-3 py-1.5 text-sm font-semibold text-gray-800 rounded-lg hover:bg-white/80 truncate max-w-[220px]">
+              {projectName}
+            </button>
+          )}
         </div>
 
-        {/* Center */}
-        <div className="pointer-events-auto">
-        </div>
-
-        {/* Right */}
-        <div className="flex items-center gap-3 pointer-events-auto">
-          <button 
+        {/* 오른쪽: 협업 / 공유 / AI */}
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <button
             onClick={onOpenMultiplayer}
-            className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white rounded-full shadow-sm hover:shadow-md hover:bg-green-700 transition-all text-sm font-medium"
+            className={cn(
+              'flex items-center gap-2 px-4 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all text-sm font-medium',
+              peerStatus === 'connected' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50',
+            )}
+            title="방 코드로 실시간 함께 그리기"
           >
             <Users size={14} />
-            협업하기
+            {peerStatus === 'connected' ? `실시간 협업 중 · ${peerCount}명` : '실시간 협업'}
           </button>
 
-          <button 
+          <button
             onClick={onShare}
             className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-full shadow-sm hover:shadow-md hover:bg-indigo-700 transition-all text-sm font-medium"
+            title="Google 로그인으로 공유 링크 만들기"
           >
             <Share size={14} />
-            Share
+            {isSharing ? '링크 복사' : '공유 링크'}
           </button>
-          
-          {/* Compact Search/Generate Bar */}
-          <div className="relative flex items-center w-64 bg-white/80 backdrop-blur-md border border-gray-200 rounded-full shadow-sm hover:shadow-md transition-all focus-within:w-80">
-            <div className="pl-3 pr-2 text-gray-400">
-              <Sparkles size={14} />
-            </div>
-            <input 
-              type="text" 
-              placeholder="Generate with AI..." 
-              className="flex-1 bg-transparent border-none outline-none py-1.5 text-xs text-gray-700 placeholder:text-gray-400"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && onGenerate && searchQuery.trim()) {
-                  onGenerate(searchQuery);
-                  setSearchQuery("");
-                }
-              }}
+
+          <div className={cn(pill, 'relative flex items-center w-60 focus-within:w-80', !aiEnabled && 'opacity-70')}>
+            <div className="pl-3 pr-2 text-indigo-400"><Sparkles size={14} /></div>
+            <input
+              type="text"
+              placeholder={aiEnabled ? 'AI로 판서 정리 (예: 광합성)' : 'AI 기능 준비 중'}
+              className="flex-1 min-w-0 bg-transparent border-none outline-none py-1.5 text-xs text-gray-700 placeholder:text-gray-400"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit(); }}
+              aria-label="AI 판서 주제"
             />
             <div className="pr-1.5">
-              <button 
-                onClick={() => {
-                  if (onGenerate && searchQuery.trim()) {
-                    onGenerate(searchQuery);
-                    setSearchQuery("");
-                  }
-                }}
-                disabled={isGenerating || !searchQuery.trim()}
+              <button
+                onClick={submit}
+                disabled={isGenerating || !query.trim()}
+                aria-label="AI로 만들기"
                 className={cn(
-                  "flex items-center justify-center w-6 h-6 rounded-full transition-colors",
-                  isGenerating || !searchQuery.trim()
-                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                    : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+                  'flex items-center justify-center w-6 h-6 rounded-full transition-colors',
+                  isGenerating || !query.trim() ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100',
                 )}
               >
                 {isGenerating ? <Sparkles size={12} className="animate-spin" /> : <ArrowRight size={12} />}
@@ -175,27 +186,15 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
         </div>
       </div>
 
-      {/* Layer 2: Action Bar */}
-      <div className="flex justify-end items-center h-14 px-4 mt-2">
-        {/* Right Group */}
-        <div className="flex items-center gap-3 pointer-events-auto">
-          <button 
-            onClick={onClearAll}
-            className="p-2.5 bg-white/80 backdrop-blur-md border border-gray-200 rounded-full shadow-sm hover:shadow-md hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all text-gray-600 group"
-            title="Clear All"
-          >
+      <div className="flex justify-end items-center h-14 px-4 mt-1">
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <button onClick={onClearAll} className={cn(pill, 'p-2.5 text-gray-600 hover:bg-red-50 hover:text-red-500 hover:border-red-200')} title="이 슬라이드 모두 지우기" aria-label="이 슬라이드 모두 지우기">
             <Trash2 size={18} />
           </button>
-          <button 
-            onClick={onToggleLayout}
-            className="p-2.5 bg-white/80 backdrop-blur-md border border-gray-200 rounded-full shadow-sm hover:shadow-md hover:bg-gray-50 transition-all text-gray-600 group"
-          >
+          <button onClick={onToggleLayout} className={cn(pill, 'p-2.5 text-gray-600 hover:bg-gray-50')} title="도구 막대 위치 바꾸기 (세로/가로)" aria-label="도구 막대 위치 바꾸기">
             <LayoutTemplate size={18} />
           </button>
-          <button 
-            onClick={onOpenSettings}
-            className="p-2.5 bg-white/80 backdrop-blur-md border border-gray-200 rounded-full shadow-sm hover:shadow-md hover:bg-gray-50 transition-all text-gray-600 group"
-          >
+          <button onClick={onOpenSettings} className={cn(pill, 'p-2.5 text-gray-600 hover:bg-gray-50')} title="설정" aria-label="설정">
             <Settings size={18} />
           </button>
         </div>

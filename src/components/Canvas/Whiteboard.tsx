@@ -1,33 +1,65 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
-import { jsPDF } from 'jspdf';
 import { cn } from '@/src/lib/utils';
+import {
+  serializeCanvas,
+  loadCanvasData,
+  newId,
+  videoRegistry,
+  attachVideoRenderLoop,
+  downscaleImageFile,
+  fileToDataURL,
+} from '@/src/lib/canvasData';
+import { toast } from 'sonner';
+
+export type ToolType =
+  | 'pen' | 'eraser' | 'laser' | 'select' | 'lasso' | 'pencil' | 'fountain' | 'ballpoint'
+  | 'dashed' | 'bucket' | 'highlighter' | 'pan' | 'eyedropper';
+
+export type CanvasBackground = 'blank' | 'grid' | 'dot' | 'dark';
+
+export type MediaSelection = { type: 'video' | 'audio' | 'weblink' | 'none'; element?: any; url?: string };
+
+export interface CanvasChangeInfo {
+  sceneId: string;
+  canvas: fabric.Canvas;
+  data: string;
+  fromLoad: boolean;
+}
+
+export interface RemoteCursor {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  color: string;
+}
 
 interface WhiteboardProps {
-  tool: 'pen' | 'eraser' | 'laser' | 'select' | 'cut' | 'circle' | 'rect' | 'pencil' | 'fountain' | 'ballpoint' | 'dashed' | 'bucket' | 'highlighter' | 'pan' | 'eyedropper';
+  tool: ToolType;
   color: string;
   brushSize: number;
-  onSceneChange?: (json: any) => void;
-  onSelectionChange?: (selection: { type: 'video' | 'audio' | 'weblink' | 'none', element?: any, url?: string }) => void;
+  canvasBackground?: CanvasBackground;
+  sceneId: string;
+  sceneData: string | null;
+  /** 같은 슬라이드라도 외부(협업·불러오기)에서 내용이 바뀌면 증가시켜 다시 불러온다 */
+  sceneRevision: number;
+  onCanvasChange?: (info: CanvasChangeInfo) => void;
+  onSelectionChange?: (selection: MediaSelection) => void;
   onZoomChange?: (zoom: number) => void;
-  initialData?: any;
   onColorPicked?: (color: string) => void;
-  onObjectsChange?: (objects: any[]) => void;
-  canvasBackground?: 'blank' | 'grid' | 'dot' | 'dark';
-  onCanvasChange?: (canvas: fabric.Canvas) => void;
   onDrawingStateChange?: (isDrawing: boolean) => void;
-  activeSceneId?: string;
-  isZenMode?: boolean;
-  multiplayer?: any;
+  onRequestTool?: (tool: ToolType) => void;
+  onPointerMove?: (x: number, y: number) => void;
+  cursors?: RemoteCursor[];
 }
 
 export interface WhiteboardHandle {
-  addResource: (type: 'image' | 'text', data: string) => void;
+  addText: (text?: string, options?: { width?: number }) => void;
   addFile: (file: File) => Promise<void>;
-  addImages: (dataUrls: string[]) => void;
+  addImages: (dataUrls: string[]) => Promise<void>;
   addWebLink: (url: string) => void;
-  addShape: (type: 'rect' | 'circle' | 'ellipse' | 'triangle' | 'polygon') => void;
-  addText: () => void;
+  addShape: (type: 'rect' | 'circle' | 'ellipse' | 'triangle' | 'polygon' | 'line' | 'arrow') => void;
   clear: () => void;
   undo: () => void;
   redo: () => void;
@@ -42,9 +74,8 @@ export interface WhiteboardHandle {
   toggleVisibility: (id: string) => void;
   selectObject: (id: string) => void;
   toJSON: () => string;
-  loadFromJSON: (json: string) => void;
-  exportToPDF: () => void;
   getCanvas: () => fabric.Canvas | null;
+  getThumbnail: () => string | undefined;
   copy: () => void;
   paste: () => void;
   cut: () => void;
@@ -53,810 +84,552 @@ export interface WhiteboardHandle {
   ungroup: () => void;
 }
 
-let globalClipboard: any = null;
+const DRAWING_TOOLS: ToolType[] = ['pen', 'pencil', 'fountain', 'ballpoint', 'dashed', 'highlighter', 'lasso'];
+const ERASABLE_TYPES = new Set(['path', 'i-text', 'text', 'textbox', 'rect', 'circle', 'ellipse', 'triangle', 'polygon', 'polyline', 'line']);
+const SHAPE_TYPES = new Set(['rect', 'circle', 'ellipse', 'triangle', 'polygon']);
+const TEXT_TYPES = new Set(['i-text', 'text', 'textbox']);
+const HISTORY_LIMIT = 50;
+const KOREAN_FONT = "'Pretendard', 'Noto Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif";
 
-export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, WhiteboardProps>(({
-  tool,
-  color,
-  brushSize,
-  onSceneChange,
-  onSelectionChange,
-  onZoomChange,
-  initialData,
-  onColorPicked,
-  onObjectsChange,
-  canvasBackground = 'blank',
-  onCanvasChange,
-  onDrawingStateChange,
-  activeSceneId,
-  multiplayer,
-}, ref) => {
+let globalClipboard: fabric.FabricObject | null = null;
+
+/** 경로(path)의 꼭짓점을 화면(scene) 좌표로 변환 */
+function getPathScenePoints(path: fabric.Path): fabric.Point[] {
+  const m = path.calcTransformMatrix();
+  const off = path.pathOffset;
+  const pts: fabric.Point[] = [];
+  for (const cmd of path.path as any[]) {
+    const n = cmd.length;
+    if (n >= 3) {
+      const x = cmd[n - 2], y = cmd[n - 1];
+      if (typeof x === 'number' && typeof y === 'number') {
+        pts.push(fabric.util.transformPoint(new fabric.Point(x - off.x, y - off.y), m));
+      }
+    }
+  }
+  return pts;
+}
+
+function pointInPolygon(p: fabric.Point, poly: fabric.Point[]) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if ((yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi + 1e-9) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function distToSegment(p: fabric.Point, a: fabric.Point, b: fabric.Point) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const x = a.x + t * dx, y = a.y + t * dy;
+  return Math.hypot(p.x - x, p.y - y);
+}
+
+function isLocked(obj: fabric.FabricObject) {
+  return !!(obj as any).locked;
+}
+
+function isHelper(obj: fabric.FabricObject | undefined) {
+  return !!obj && !!obj.excludeFromExport;
+}
+
+export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, WhiteboardProps>((props, ref) => {
+  const { tool, color, brushSize, canvasBackground = 'blank', sceneId, sceneData, sceneRevision, cursors } = props;
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 최신 props를 이벤트 핸들러에서 안전하게 쓰기 위한 ref (오래된 값 참조 방지)
+  const propsRef = useRef(props);
+  propsRef.current = props;
   const toolRef = useRef(tool);
-  const lastLoadedSceneIdRef = useRef<string | undefined>(activeSceneId);
+  toolRef.current = tool;
+  const colorRef = useRef(color);
+  colorRef.current = color;
+  const brushSizeRef = useRef(brushSize);
+  brushSizeRef.current = brushSize;
+  const backgroundRef = useRef(canvasBackground);
+  backgroundRef.current = canvasBackground;
 
-  useEffect(() => {
-    toolRef.current = tool;
-  }, [tool]);
+  const currentSceneIdRef = useRef<string>(sceneId);
+  const isLoadingRef = useRef(false);
+  const isRestoringRef = useRef(false);
+  const isDrawingRef = useRef(false);
+  const loadTokenRef = useRef(0);
 
-  useEffect(() => {
-    if (fabricRef.current && activeSceneId !== lastLoadedSceneIdRef.current) {
-      lastLoadedSceneIdRef.current = activeSceneId;
-      if (initialData) {
-        isRestoringRef.current = true;
-        fabricRef.current.loadFromJSON(initialData)
-          .then(() => {
-            if (fabricRef.current) {
-              const isSelectionTool = toolRef.current === 'select' || toolRef.current === 'cut';
-              fabricRef.current.forEachObject(obj => {
-                obj.selectable = isSelectionTool;
-                obj.evented = isSelectionTool;
-              });
-              fabricRef.current.requestRenderAll();
-            }
-          })
-          .catch((err) => {
-            console.error("Error loading canvas data:", err);
-          })
-          .finally(() => {
-            isRestoringRef.current = false;
-          });
-      } else {
-        fabricRef.current.clear();
-        fabricRef.current.backgroundColor = '#ffffff';
-        fabricRef.current.requestRenderAll();
-      }
-    }
-  }, [activeSceneId, initialData]);
+  const undoRef = useRef<string[]>([]);
+  const redoRef = useRef<string[]>([]);
+  const pendingHistoryRef = useRef(false);
+  const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // History State
-  const [undoStack, setUndoStack] = useState<string[]>([]);
-  const [redoStack, setRedoStack] = useState<string[]>([]);
+  const laserRef = useRef<fabric.Circle | null>(null);
+  const eraserCursorRef = useRef<fabric.Circle | null>(null);
+  const isErasingRef = useRef(false);
+  const erasedRef = useRef(false);
+
+  /** 선택 도구로 바뀐 직후 선택할 객체들 (도구 전환과 선택 사이의 순서 문제 방지) */
+  const pendingSelectRef = useRef<fabric.FabricObject[] | null>(null);
   const [hasSelection, setHasSelection] = useState(false);
   const [isGroupSelected, setIsGroupSelected] = useState(false);
   const [canGroup, setCanGroup] = useState(false);
-  const isRestoringRef = useRef(false);
-  const isDrawingRef = useRef(false);
+  const [, forceRender] = useState(0);
 
-  const multiplayerRef = useRef(multiplayer);
-  useEffect(() => {
-    multiplayerRef.current = multiplayer;
-  }, [multiplayer]);
+  const getCanvas = useCallback(() => fabricRef.current, []);
 
-  const updateObjectsList = useCallback(() => {
-    if (!fabricRef.current || isDrawingRef.current) return;
-    const objects = fabricRef.current.getObjects().map(obj => ({
-      id: (obj as any).id,
-      type: obj.type,
-      visible: obj.visible,
-      locked: !obj.selectable,
-    }));
-    onObjectsChange?.(objects);
-  }, [onObjectsChange]);
-
-  const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const notifyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const handleImagesAdd = useCallback(async (dataUrls: string[]) => {
+  // ---------- 배경 ----------
+  const applyBackground = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    
-    const columns = 4;
-    const padding = 40;
-    const targetWidth = 400;
-    
-    const images = await Promise.all(dataUrls.map(url => {
-      return new Promise<fabric.FabricImage>((resolve) => {
-        fabric.FabricImage.fromURL(url).then(resolve);
-      });
-    }));
-    
-    let currentX = 0;
-    let currentY = 0;
-    let rowHeight = 0;
-    
-    images.forEach((img, index) => {
-      const scale = targetWidth / img.width!;
-      img.scale(scale);
-      
-      const col = index % columns;
-      const row = Math.floor(index / columns);
-      
-      if (col === 0 && row > 0) {
-         currentX = 0;
-         currentY += rowHeight + padding;
-         rowHeight = 0;
-      }
-      
-      img.set({
-        left: currentX,
-        top: currentY,
-        cornerColor: '#3b82f6',
-        cornerSize: 10,
-        transparentCorners: false,
-      });
-      
-      currentX += img.getScaledWidth() + padding;
-      rowHeight = Math.max(rowHeight, img.getScaledHeight());
-    });
-    
-    const totalWidth = Math.min(images.length, columns) * targetWidth + (Math.min(images.length, columns) - 1) * padding;
-    const totalHeight = currentY + rowHeight;
-    
-    const startX = (canvas.width! - totalWidth) / 2;
-    const startY = (canvas.height! - totalHeight) / 2;
-    
-    images.forEach(img => {
-      img.set({
-        left: img.left! + startX,
-        top: img.top! + startY
-      });
-      canvas.add(img);
-    });
-    
-    if (images.length > 0) {
-      const sel = new fabric.ActiveSelection(images, { canvas });
-      canvas.setActiveObject(sel);
-      canvas.requestRenderAll();
-    }
+    canvas.backgroundColor = backgroundRef.current === 'dark' ? '#1a202c' : 'transparent';
+    canvas.requestRenderAll();
   }, []);
 
-  const saveHistory = useCallback(() => {
-    if (isRestoringRef.current || !fabricRef.current || isDrawingRef.current) return;
-    
-    if (historyTimeoutRef.current) clearTimeout(historyTimeoutRef.current);
-    
-    historyTimeoutRef.current = setTimeout(() => {
-      if (!fabricRef.current) return;
-      const jsonStr = JSON.stringify(fabricRef.current.toObject(['id', 'isVideo', 'videoElement', 'isAudio', 'audioUrl', 'isWebLink', 'url']));
-      
-      setUndoStack((prev) => {
-        if (prev.length > 0 && prev[prev.length - 1] === jsonStr) {
-          return prev;
-        }
-        return [...prev, jsonStr];
-      });
-      setRedoStack([]);
-      updateObjectsList();
-    }, 100); // Trigger much faster so undo captures the state
-  }, [updateObjectsList]);
-
-  const notifyCanvasChange = useCallback(() => {
-    if (onCanvasChange && fabricRef.current) {
-      if (notifyTimeoutRef.current) clearTimeout(notifyTimeoutRef.current);
-      
-      notifyTimeoutRef.current = setTimeout(() => {
-        if (fabricRef.current) {
-          onCanvasChange(fabricRef.current);
-        }
-      }, 1000); // Increased to 1s
-    }
-  }, [onCanvasChange]);
-
-  const handleCopy = useCallback(() => {
+  // ---------- 도구 상태 (선택 가능 여부 등) ----------
+  const applyToolState = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const activeObject = canvas.getActiveObject();
-    if (activeObject) {
-      activeObject.clone().then((cloned: any) => {
-        globalClipboard = cloned;
-      });
+    const t = toolRef.current;
+    const isSelect = t === 'select';
+    const isBucket = t === 'bucket';
+    canvas.isDrawingMode = DRAWING_TOOLS.includes(t);
+    canvas.selection = isSelect;
+    canvas.skipTargetFind = !(isSelect || isBucket);
+    canvas.defaultCursor =
+      t === 'pan' ? 'grab' : t === 'eraser' ? 'none' : isSelect ? 'default' : t === 'bucket' ? 'pointer' : 'crosshair';
+    canvas.forEachObject(obj => {
+      if (isHelper(obj)) return;
+      const locked = isLocked(obj);
+      obj.selectable = isSelect && !locked;
+      obj.evented = (isSelect && !locked) || (isBucket && !locked);
+    });
+    if (t !== 'eraser' && eraserCursorRef.current) {
+      canvas.remove(eraserCursorRef.current);
+      eraserCursorRef.current = null;
     }
+    canvas.requestRenderAll();
+  }, []);
+
+  // ---------- 변경 알림 / 히스토리 ----------
+  const notifyChange = useCallback(() => {
+    if (isLoadingRef.current) return;
+    const scheduledFor = currentSceneIdRef.current;
+    if (notifyTimerRef.current) clearTimeout(notifyTimerRef.current);
+    notifyTimerRef.current = setTimeout(() => {
+      const canvas = fabricRef.current;
+      if (!canvas || isLoadingRef.current) return;
+      if (currentSceneIdRef.current !== scheduledFor) return; // 그 사이 슬라이드가 바뀜
+      if (isDrawingRef.current) {
+        notifyChange();
+        return;
+      }
+      propsRef.current.onCanvasChange?.({ sceneId: scheduledFor, canvas, data: serializeCanvas(canvas), fromLoad: false });
+    }, 600);
+  }, []);
+
+  /** 슬라이드마다 실행 취소 기록을 따로 보관 (다른 슬라이드에 다녀와도 유지) */
+  const historyMapRef = useRef(new Map<string, { undo: string[]; redo: string[] }>());
+  const attachHistory = useCallback((id: string) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const snap = serializeCanvas(canvas);
+    let entry = historyMapRef.current.get(id);
+    if (!entry) {
+      entry = { undo: [snap], redo: [] };
+      historyMapRef.current.set(id, entry);
+    } else if (entry.undo[entry.undo.length - 1] !== snap) {
+      // 다른 사람의 변경이나 불러오기로 내용이 바뀐 경우: 새 단계로 기록
+      entry.undo.push(snap);
+      if (entry.undo.length > HISTORY_LIMIT) entry.undo.splice(0, entry.undo.length - HISTORY_LIMIT);
+      entry.redo.length = 0;
+    }
+    undoRef.current = entry.undo;
+    redoRef.current = entry.redo;
+  }, []);
+
+  const recordHistory = useCallback(() => {
+    if (isLoadingRef.current || isRestoringRef.current) return;
+    if (isDrawingRef.current) {
+      pendingHistoryRef.current = true;
+      return;
+    }
+    if (historyTimerRef.current) clearTimeout(historyTimerRef.current);
+    historyTimerRef.current = setTimeout(() => {
+      const canvas = fabricRef.current;
+      if (!canvas || isLoadingRef.current || isRestoringRef.current) return;
+      const snap = serializeCanvas(canvas);
+      const stack = undoRef.current;
+      if (stack[stack.length - 1] === snap) return;
+      stack.push(snap);
+      if (stack.length > HISTORY_LIMIT) stack.splice(0, stack.length - HISTORY_LIMIT);
+      redoRef.current.length = 0;
+    }, 150);
+  }, []);
+
+  const commitChange = useCallback(() => {
+    recordHistory();
+    notifyChange();
+  }, [recordHistory, notifyChange]);
+
+  const afterLoad = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    canvas.forEachObject(obj => {
+      if (!(obj as any).id) (obj as any).id = newId();
+      if (isLocked(obj)) obj.set({ lockMovementX: true, lockMovementY: true, lockRotation: true, lockScalingX: true, lockScalingY: true });
+    });
+    applyBackground();
+    applyToolState();
+  }, [applyBackground, applyToolState]);
+
+  const restoreSnapshot = useCallback(async (snap: string) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    isRestoringRef.current = true;
+    try {
+      canvas.discardActiveObject();
+      await loadCanvasData(canvas, snap, getCanvas);
+      afterLoad();
+    } finally {
+      isRestoringRef.current = false;
+    }
+    notifyChange();
+    forceRender(n => n + 1);
+  }, [afterLoad, getCanvas, notifyChange]);
+
+  const undo = useCallback(() => {
+    if (undoRef.current.length <= 1 || isRestoringRef.current) return;
+    if (historyTimerRef.current) clearTimeout(historyTimerRef.current);
+    const current = undoRef.current.pop()!;
+    redoRef.current.push(current);
+    restoreSnapshot(undoRef.current[undoRef.current.length - 1]);
+  }, [restoreSnapshot]);
+
+  const redo = useCallback(() => {
+    if (redoRef.current.length === 0 || isRestoringRef.current) return;
+    const next = redoRef.current.pop()!;
+    undoRef.current.push(next);
+    restoreSnapshot(next);
+  }, [restoreSnapshot]);
+
+  const selectObjects = useCallback((objs: fabric.FabricObject[]) => {
+    const canvas = fabricRef.current;
+    if (!canvas || objs.length === 0) return;
+    if (toolRef.current !== 'select') {
+      pendingSelectRef.current = objs;
+      propsRef.current.onRequestTool?.('select');
+      return;
+    }
+    objs.forEach(o => { o.selectable = true; o.evented = true; });
+    canvas.discardActiveObject();
+    canvas.setActiveObject(objs.length === 1 ? objs[0] : new fabric.ActiveSelection(objs, { canvas }));
+    canvas.requestRenderAll();
+  }, []);
+
+  // ---------- 화면 중앙 배치 ----------
+  const placeAtCenter = useCallback((obj: fabric.FabricObject) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    canvas.viewportCenterObject(obj);
+  }, []);
+
+  const addAndSelect = useCallback((obj: fabric.FabricObject) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    if (!(obj as any).id) (obj as any).id = newId();
+    canvas.add(obj);
+    selectObjects([obj]);
+  }, [selectObjects]);
+
+  // ---------- 편집 동작 ----------
+  const handleCopy = useCallback(() => {
+    const active = fabricRef.current?.getActiveObject();
+    if (active) active.clone(['id', 'locked']).then(cloned => { globalClipboard = cloned; });
   }, []);
 
   const handleDeleteSelected = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const activeObjects = canvas.getActiveObjects();
-    if (activeObjects.length > 0) {
-      isRestoringRef.current = true;
-      canvas.remove(...activeObjects);
-      canvas.discardActiveObject();
-      isRestoringRef.current = false;
-      saveHistory();
-      notifyCanvasChange();
-      canvas.requestRenderAll();
-      setHasSelection(false);
-    }
-  }, [saveHistory, notifyCanvasChange]);
+    const objs = canvas.getActiveObjects();
+    if (objs.length === 0) return;
+    canvas.discardActiveObject();
+    canvas.remove(...objs);
+    canvas.requestRenderAll();
+    setHasSelection(false);
+    commitChange();
+  }, [commitChange]);
 
   const handleCut = useCallback(() => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-    const activeObject = canvas.getActiveObject();
-    if (activeObject) {
-      activeObject.clone().then((cloned: any) => {
-        globalClipboard = cloned;
-        handleDeleteSelected();
-      });
-    }
+    const active = fabricRef.current?.getActiveObject();
+    if (!active) return;
+    active.clone(['id', 'locked']).then(cloned => {
+      globalClipboard = cloned;
+      handleDeleteSelected();
+    });
   }, [handleDeleteSelected]);
 
-  const handlePaste = useCallback(() => {
+  const handlePaste = useCallback(async () => {
     const canvas = fabricRef.current;
     if (!canvas || !globalClipboard) return;
-
-    globalClipboard.clone().then((clonedObj: any) => {
-      canvas.discardActiveObject();
-      
-      clonedObj.set({
-        left: clonedObj.left + 20,
-        top: clonedObj.top + 20,
-        evented: true,
-      });
-      
-      if (clonedObj.type === 'activeSelection') {
-        clonedObj.canvas = canvas;
-        clonedObj.forEachObject((obj: any) => {
-          if (!obj.id) obj.id = Math.random().toString(36).substr(2, 9);
-          canvas.add(obj);
-        });
-        clonedObj.setCoords();
-      } else {
-        if (!clonedObj.id) clonedObj.id = Math.random().toString(36).substr(2, 9);
-        canvas.add(clonedObj);
-      }
-      
-      globalClipboard.top += 20;
-      globalClipboard.left += 20;
-      
-      canvas.setActiveObject(clonedObj);
-      canvas.requestRenderAll();
-      
-      saveHistory();
-      notifyCanvasChange();
-    });
-  }, [saveHistory, notifyCanvasChange]);
+    const cloned: any = await globalClipboard.clone(['locked']);
+    canvas.discardActiveObject();
+    cloned.set({ left: cloned.left + 20, top: cloned.top + 20, evented: true });
+    if (cloned instanceof fabric.ActiveSelection) {
+      cloned.canvas = canvas;
+      cloned.forEachObject((o: any) => { o.id = newId(); canvas.add(o); });
+      cloned.setCoords();
+    } else {
+      cloned.id = newId();
+      canvas.add(cloned);
+    }
+    globalClipboard.set({ left: (globalClipboard.left || 0) + 20, top: (globalClipboard.top || 0) + 20 });
+    if (toolRef.current !== 'select') propsRef.current.onRequestTool?.('select');
+    canvas.setActiveObject(cloned);
+    canvas.requestRenderAll();
+    commitChange();
+  }, [commitChange]);
 
   const handleGroup = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const activeObject = canvas.getActiveObject();
-    
-    if (activeObject && activeObject.type === 'activeSelection') {
-      (activeObject as any).toGroup();
-      canvas.requestRenderAll();
-      saveHistory();
-      notifyCanvasChange();
-    }
-  }, [saveHistory, notifyCanvasChange]);
+    const active = canvas.getActiveObject();
+    if (!(active instanceof fabric.ActiveSelection)) return;
+    const objs = active.removeAll();
+    canvas.remove(...objs);
+    const group = new fabric.Group(objs);
+    (group as any).id = newId();
+    canvas.add(group);
+    canvas.setActiveObject(group);
+    canvas.requestRenderAll();
+    commitChange();
+  }, [commitChange]);
 
   const handleUngroup = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const activeObject = canvas.getActiveObject();
-    
-    if (activeObject && activeObject.type === 'group') {
-      (activeObject as any).toActiveSelection();
-      canvas.requestRenderAll();
-      saveHistory();
-      notifyCanvasChange();
-    }
-  }, [saveHistory, notifyCanvasChange]);
+    const active = canvas.getActiveObject();
+    if (!(active instanceof fabric.Group) || active instanceof fabric.ActiveSelection) return;
+    if ((active as any).isAudio || (active as any).isWebLink) return; // 미디어 카드는 풀지 않음
+    const objs = active.removeAll();
+    canvas.remove(active);
+    objs.forEach(o => { (o as any).id = (o as any).id || newId(); canvas.add(o); });
+    const sel = new fabric.ActiveSelection(objs, { canvas });
+    canvas.setActiveObject(sel);
+    canvas.requestRenderAll();
+    commitChange();
+  }, [commitChange]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only delete if we're not typing in an input or textarea
-      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
-      
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        handleDeleteSelected();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-        handleCopy();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        handlePaste();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleDeleteSelected, handleCopy, handlePaste]);
+  const handleImagesAdd = useCallback(async (dataUrls: string[]) => {
+    const canvas = fabricRef.current;
+    if (!canvas || dataUrls.length === 0) return;
+    const columns = Math.min(4, dataUrls.length);
+    const padding = 40;
+    const targetWidth = 400;
+    const images = await Promise.all(dataUrls.map(url => fabric.FabricImage.fromURL(url)));
+    const center = canvas.getVpCenter();
+    const rows = Math.ceil(images.length / columns);
+    const cellH = Math.max(...images.map(img => img.height * (targetWidth / img.width)));
+    const totalW = columns * targetWidth + (columns - 1) * padding;
+    const totalH = rows * cellH + (rows - 1) * padding;
+    images.forEach((img, i) => {
+      img.scale(targetWidth / img.width);
+      const col = i % columns, row = Math.floor(i / columns);
+      img.set({
+        left: center.x - totalW / 2 + col * (targetWidth + padding) + targetWidth / 2,
+        top: center.y - totalH / 2 + row * (cellH + padding) + img.getScaledHeight() / 2,
+        cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false,
+      });
+      (img as any).id = newId();
+      canvas.add(img);
+    });
+    selectObjects(images);
+  }, [selectObjects]);
 
-  // Expose methods via ref
+  // ---------- 외부 노출 메서드 ----------
   React.useImperativeHandle(ref, () => ({
-    undo: () => {
-      if (undoStack.length <= 1 || !fabricRef.current) return;
-
-      isRestoringRef.current = true;
-      const current = undoStack[undoStack.length - 1];
-      const prev = undoStack[undoStack.length - 2];
-      
-      setRedoStack((stack) => [...stack, current]);
-      setUndoStack((stack) => stack.slice(0, -1));
-
-      // Use string directly if loadFromJSON supports it, or parse it if it's a string
-      const parsedPrev = typeof prev === 'string' ? JSON.parse(prev) : prev;
-      fabricRef.current.loadFromJSON(parsedPrev).then(() => {
-        fabricRef.current?.renderAll();
-        isRestoringRef.current = false;
-      });
-    },
-    redo: () => {
-      if (redoStack.length === 0 || !fabricRef.current) return;
-
-      isRestoringRef.current = true;
-      const next = redoStack[redoStack.length - 1];
-      
-      setUndoStack((stack) => [...stack, next]);
-      setRedoStack((stack) => stack.slice(0, -1));
-
-      const parsedNext = typeof next === 'string' ? JSON.parse(next) : next;
-      fabricRef.current.loadFromJSON(parsedNext).then(() => {
-        fabricRef.current?.renderAll();
-        isRestoringRef.current = false;
-      });
-    },
+    undo,
+    redo,
     zoomIn: () => {
-      if (!fabricRef.current) return;
-      let zoom = fabricRef.current.getZoom();
-      zoom *= 1.1;
-      if (zoom > 20) zoom = 20;
-      fabricRef.current.setZoom(zoom);
-      onZoomChange?.(zoom);
+      const c = fabricRef.current; if (!c) return;
+      const zoom = Math.min(20, c.getZoom() * 1.1);
+      c.zoomToPoint(new fabric.Point(c.width / 2, c.height / 2), zoom);
+      propsRef.current.onZoomChange?.(zoom);
     },
     zoomOut: () => {
-      if (!fabricRef.current) return;
-      let zoom = fabricRef.current.getZoom();
-      zoom /= 1.1;
-      if (zoom < 0.01) zoom = 0.01;
-      fabricRef.current.setZoom(zoom);
-      onZoomChange?.(zoom);
+      const c = fabricRef.current; if (!c) return;
+      const zoom = Math.max(0.05, c.getZoom() / 1.1);
+      c.zoomToPoint(new fabric.Point(c.width / 2, c.height / 2), zoom);
+      propsRef.current.onZoomChange?.(zoom);
     },
     resetZoom: () => {
-      if (!fabricRef.current) return;
-      fabricRef.current.setZoom(1);
-      fabricRef.current.viewportTransform = [1, 0, 0, 1, 0, 0];
-      fabricRef.current.renderAll();
-      onZoomChange?.(1);
+      const c = fabricRef.current; if (!c) return;
+      c.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      c.requestRenderAll();
+      propsRef.current.onZoomChange?.(1);
+      forceRender(n => n + 1);
     },
-    bringToFront: () => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      const activeObject = canvas.getActiveObject();
-      if (activeObject) {
-        canvas.bringObjectToFront(activeObject);
-        saveHistory();
-      }
-    },
-    sendToBack: () => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      const activeObject = canvas.getActiveObject();
-      if (activeObject) {
-        canvas.sendObjectToBack(activeObject);
-        saveHistory();
-      }
-    },
-    bringForward: () => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      const activeObject = canvas.getActiveObject();
-      if (activeObject) {
-        canvas.bringObjectForward(activeObject);
-        saveHistory();
-      }
-    },
-    sendBackward: () => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      const activeObject = canvas.getActiveObject();
-      if (activeObject) {
-        canvas.sendObjectBackwards(activeObject);
-        saveHistory();
-      }
-    },
+    bringToFront: () => { const c = fabricRef.current; const o = c?.getActiveObject(); if (c && o) { c.bringObjectToFront(o); commitChange(); } },
+    sendToBack: () => { const c = fabricRef.current; const o = c?.getActiveObject(); if (c && o) { c.sendObjectToBack(o); commitChange(); } },
+    bringForward: () => { const c = fabricRef.current; const o = c?.getActiveObject(); if (c && o) { c.bringObjectForward(o); commitChange(); } },
+    sendBackward: () => { const c = fabricRef.current; const o = c?.getActiveObject(); if (c && o) { c.sendObjectBackwards(o); commitChange(); } },
     toggleLock: (id: string) => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      const obj = canvas.getObjects().find(o => (o as any).id === id);
-      if (obj) {
-        const isLocked = !obj.selectable;
-        obj.set({
-          selectable: isLocked,
-          evented: isLocked,
-          lockMovementX: !isLocked,
-          lockMovementY: !isLocked,
-          lockRotation: !isLocked,
-          lockScalingX: !isLocked,
-          lockScalingY: !isLocked,
-        });
-        canvas.discardActiveObject();
-        canvas.requestRenderAll();
-        saveHistory();
-      }
+      const c = fabricRef.current; if (!c) return;
+      const obj = c.getObjects().find(o => (o as any).id === id);
+      if (!obj) return;
+      const lock = !isLocked(obj);
+      (obj as any).locked = lock;
+      obj.set({ lockMovementX: lock, lockMovementY: lock, lockRotation: lock, lockScalingX: lock, lockScalingY: lock });
+      c.discardActiveObject();
+      applyToolState();
+      commitChange();
     },
     toggleVisibility: (id: string) => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      const obj = canvas.getObjects().find(o => (o as any).id === id);
-      if (obj) {
-        obj.set('visible', !obj.visible);
-        canvas.discardActiveObject();
-        canvas.requestRenderAll();
-        saveHistory();
-      }
+      const c = fabricRef.current; if (!c) return;
+      const obj = c.getObjects().find(o => (o as any).id === id);
+      if (!obj) return;
+      obj.set('visible', !obj.visible);
+      c.discardActiveObject();
+      c.requestRenderAll();
+      commitChange();
     },
     selectObject: (id: string) => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      const obj = canvas.getObjects().find(o => (o as any).id === id);
-      if (obj && obj.selectable && obj.visible) {
-        canvas.setActiveObject(obj);
-        canvas.requestRenderAll();
-      }
+      const c = fabricRef.current; if (!c) return;
+      const obj = c.getObjects().find(o => (o as any).id === id);
+      if (obj && !isLocked(obj) && obj.visible) selectObjects([obj]);
     },
-    toJSON: () => {
-      const canvas = fabricRef.current;
-      if (!canvas) return '';
-      return JSON.stringify(canvas.toObject(['id', 'isVideo', 'videoElement', 'isAudio', 'audioUrl', 'isWebLink', 'url']));
-    },
-    loadFromJSON: (json: string) => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      try {
-        const parsed = typeof json === 'string' ? JSON.parse(json) : json;
-        canvas.loadFromJSON(parsed).then(() => {
-          canvas.renderAll();
-          saveHistory();
-        });
-      } catch (e) {
-        console.error('Failed to load JSON', e);
-      }
-    },
-    exportToPDF: () => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-      
-      // Temporarily deselect objects to avoid selection boxes in PDF
-      canvas.discardActiveObject();
-      canvas.renderAll();
-
-      const dataUrl = canvas.toDataURL({
-        format: 'png',
-        quality: 1,
-        multiplier: 2 // High resolution
-      });
-
-      // A4 dimensions in mm
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-
-      // Calculate aspect ratio to fit image
-      const imgProps = pdf.getImageProperties(dataUrl);
-      const imgRatio = imgProps.width / imgProps.height;
-      const pdfRatio = pdfWidth / pdfHeight;
-
-      let finalWidth, finalHeight;
-      if (imgRatio > pdfRatio) {
-        finalWidth = pdfWidth;
-        finalHeight = pdfWidth / imgRatio;
-      } else {
-        finalHeight = pdfHeight;
-        finalWidth = pdfHeight * imgRatio;
-      }
-
-      // Center the image
-      const x = (pdfWidth - finalWidth) / 2;
-      const y = (pdfHeight - finalHeight) / 2;
-
-      pdf.addImage(dataUrl, 'PNG', x, y, finalWidth, finalHeight);
-      
-      const dateStr = new Date().toISOString().split('T')[0];
-      pdf.save(`Lecture_Note_${dateStr}.pdf`);
-    },
+    toJSON: () => (fabricRef.current ? serializeCanvas(fabricRef.current) : ''),
     getCanvas: () => fabricRef.current,
-    addResource: (type, data) => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-
-      if (type === 'text') {
-        const text = new fabric.IText(data, {
-          left: 100,
-          top: 100,
-          fontSize: 20,
-          fontFamily: 'Inter',
-          fill: '#333',
-        });
-        canvas.add(text);
-        canvas.setActiveObject(text);
-      } else if (type === 'image') {
-        fabric.FabricImage.fromURL(data).then((img) => {
-          img.scaleToWidth(200);
-          canvas.add(img);
-          canvas.setActiveObject(img);
-        });
-      }
-      canvas.requestRenderAll();
+    getThumbnail: () => {
+      const c = fabricRef.current;
+      if (!c) return undefined;
+      try { return c.toDataURL({ multiplier: 0.15, format: 'jpeg', quality: 0.7 }); } catch { return undefined; }
     },
-    addFile: async (file) => {
+    addText: (text = '내용을 입력하세요', options: { width?: number } = {}) => {
+      const t = options.width
+        ? new fabric.Textbox(text, { width: options.width, fontFamily: KOREAN_FONT, fontSize: 22, fill: backgroundRef.current === 'dark' ? '#ffffff' : colorRef.current, cornerColor: '#3b82f6' })
+        : new fabric.IText(text, { fontFamily: KOREAN_FONT, fontSize: Math.max(20, brushSizeRef.current * 6), fill: colorRef.current, cornerColor: '#3b82f6' });
+      placeAtCenter(t);
+      addAndSelect(t);
+    },
+    addFile: async (file: File) => {
       const canvas = fabricRef.current;
       if (!canvas) return;
-
-      const fileType = file.type;
-      const fileName = file.name.toLowerCase();
-
-      if (fileType.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          fabric.FabricImage.fromURL(e.target?.result as string).then((img) => {
-            const safeWidth = canvas.width! - 100;
-            const safeHeight = canvas.height! - 240;
-            const scale = Math.min(safeWidth / img.width!, safeHeight / img.height!, 1);
-            img.scale(scale);
-            canvas.centerObject(img);
-            canvas.add(img);
-            canvas.setActiveObject(img);
-            canvas.requestRenderAll();
-          });
-        };
-        reader.readAsDataURL(file);
-      } else if (fileType.startsWith('video/')) {
-        const videoElement = document.createElement('video');
-        videoElement.src = URL.createObjectURL(file);
-        videoElement.muted = true;
-        videoElement.loop = true;
-        videoElement.playsInline = true;
-        videoElement.crossOrigin = 'anonymous';
-
-        videoElement.onloadedmetadata = () => {
-          const fabricVideo = new fabric.FabricImage(videoElement, {
-            objectCaching: false,
-          });
-          
-          const safeWidth = canvas.width! - 100;
-          const safeHeight = canvas.height! - 240;
-          const scale = Math.min(safeWidth / fabricVideo.width!, safeHeight / fabricVideo.height!, 1);
-          fabricVideo.scale(scale);
-          canvas.centerObject(fabricVideo);
-          
-          canvas.add(fabricVideo);
-          canvas.setActiveObject(fabricVideo);
-
-          // Video play logic
-          videoElement.play();
-
-          // Custom property to identify video
-          (fabricVideo as any).isVideo = true;
-          (fabricVideo as any).videoElement = videoElement;
-
-          const render = () => {
-            canvas.requestRenderAll();
-            if (!videoElement.paused && !videoElement.ended) {
-              fabric.util.requestAnimFrame(render);
-            }
-          };
-          fabric.util.requestAnimFrame(render);
-        };
-      } else if (fileType.startsWith('audio/')) {
-        const audioUrl = URL.createObjectURL(file);
+      const type = file.type;
+      const name = file.name.toLowerCase();
+      if (type.startsWith('image/')) {
+        const dataUrl = await downscaleImageFile(file);
+        const img = await fabric.FabricImage.fromURL(dataUrl);
+        const scale = Math.min((canvas.width - 100) / img.width, (canvas.height - 240) / img.height, 1) / canvas.getZoom();
+        img.scale(scale);
+        img.set({ cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false });
+        placeAtCenter(img);
+        addAndSelect(img);
+      } else if (type.startsWith('video/')) {
+        const el = document.createElement('video');
+        const src = URL.createObjectURL(file);
+        el.src = src;
+        el.muted = true;
+        el.loop = true;
+        el.playsInline = true;
+        el.preload = 'auto';
+        await new Promise<void>(resolve => { el.onloadeddata = () => resolve(); el.onerror = () => resolve(); });
+        el.width = el.videoWidth;
+        el.height = el.videoHeight;
+        videoRegistry.set(src, el);
+        attachVideoRenderLoop(el, getCanvas);
+        const vid = new fabric.FabricImage(el, { objectCaching: false });
+        const scale = Math.min((canvas.width - 100) / vid.width, (canvas.height - 240) / vid.height, 1) / canvas.getZoom();
+        vid.scale(scale);
+        (vid as any).isVideo = true;
+        placeAtCenter(vid);
+        addAndSelect(vid);
+        el.play().catch(() => {});
+        toast.info('동영상은 이 화면이 열려 있는 동안만 유지됩니다. 새로고침 후에는 파일을 다시 넣어 주세요.');
+      } else if (type.startsWith('audio/')) {
+        let audioUrl: string;
+        if (file.size <= 3 * 1024 * 1024) {
+          audioUrl = await fileToDataURL(file);
+        } else {
+          audioUrl = URL.createObjectURL(file);
+          toast.info('3MB가 넘는 오디오는 저장되지 않고, 이 화면에서만 재생됩니다.');
+        }
+        const label = file.name.length > 16 ? file.name.slice(0, 15) + '…' : file.name;
         const group = new fabric.Group([
-          new fabric.Rect({
-            width: 120,
-            height: 120,
-            fill: '#f3f4f6',
-            stroke: '#e5e7eb',
-            strokeWidth: 2,
-            rx: 12,
-            ry: 12,
-          }),
-          new fabric.IText('🎵', {
-            fontSize: 40,
-            left: 40,
-            top: 25,
-          }),
-          new fabric.IText(file.name.substring(0, 15) + '...', {
-            fontSize: 10,
-            left: 10,
-            top: 80,
-            fill: '#666',
-          })
-        ], {
-          left: 100,
-          top: 100,
-        });
+          new fabric.Rect({ width: 140, height: 120, fill: '#f3f4f6', stroke: '#e5e7eb', strokeWidth: 2, rx: 12, ry: 12, originX: 'left', originY: 'top' }),
+          new fabric.FabricText('🎵', { fontSize: 40, left: 48, top: 20, originX: 'left', originY: 'top' }),
+          new fabric.FabricText(label, { fontSize: 11, left: 10, top: 84, fill: '#666', fontFamily: KOREAN_FONT, originX: 'left', originY: 'top' }),
+        ]);
         (group as any).isAudio = true;
         (group as any).audioUrl = audioUrl;
-        canvas.add(group);
-        canvas.setActiveObject(group);
-      } else if (fileName.endsWith('.pptx')) {
-        try {
-          // Dynamic import JSZip from CDN
-          const JSZipModule: any = await import('https://esm.sh/jszip');
-          const JSZip = JSZipModule.default;
-          const zip = await JSZip.loadAsync(file);
-          const mediaFolder = zip.folder("ppt/media");
-          
-          if (mediaFolder) {
-            const imageFiles = Object.keys(mediaFolder.files).filter(name => 
-              name.toLowerCase().match(/\.(jpg|jpeg|png|gif|emf|wmf)$/i)
-            );
-            
-            if (imageFiles.length > 0) {
-              const dataUrls = await Promise.all(imageFiles.map(async name => {
-                const fileData = mediaFolder.file(name);
-                if (!fileData) return "";
-                const blob = await fileData.async("blob");
-                return URL.createObjectURL(blob);
-              }));
-              
-              const validUrls = dataUrls.filter(url => url !== "");
-              if (validUrls.length > 0) {
-                handleImagesAdd(validUrls);
-                return;
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Error extracting images from PPTX:", err);
-        }
-
-        // Fallback if extraction fails
-        const group = new fabric.Group([
-          new fabric.Rect({
-            width: 120,
-            height: 120,
-            fill: '#fff',
-            stroke: '#3b82f6',
-            strokeWidth: 2,
-            rx: 12,
-            ry: 12,
-          }),
-          new fabric.IText('📄', {
-            fontSize: 40,
-            left: 40,
-            top: 25,
-          }),
-          new fabric.IText(file.name.substring(0, 15) + '...', {
-            fontSize: 10,
-            left: 10,
-            top: 80,
-            fill: '#666',
-          }),
-          new fabric.IText('Images not found. Convert to PDF.', {
-            fontSize: 8,
-            left: 10,
-            top: 100,
-            fill: '#999',
-          })
-        ], {
-          left: 100,
-          top: 100,
+        placeAtCenter(group);
+        addAndSelect(group);
+      } else if (name.endsWith('.pptx') || name.endsWith('.ppt')) {
+        toast.error('파워포인트 파일은 바로 넣을 수 없습니다.', {
+          description: 'PowerPoint에서 [다른 이름으로 저장 → PDF]로 저장한 뒤 PDF 파일을 넣어 주세요. 슬라이드마다 한 장씩 들어갑니다.',
+          duration: 8000,
         });
-        canvas.add(group);
-        canvas.setActiveObject(group);
+      } else {
+        toast.error('지원하지 않는 파일 형식입니다.', { description: '이미지, PDF, 동영상, 오디오 파일을 넣을 수 있습니다.' });
       }
-      canvas.requestRenderAll();
     },
-    addImages: (dataUrls: string[]) => handleImagesAdd(dataUrls),
-    addWebLink: (url) => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-
+    addImages: handleImagesAdd,
+    addWebLink: (url: string) => {
+      const display = url.length > 32 ? url.slice(0, 31) + '…' : url;
       const group = new fabric.Group([
-        new fabric.Rect({
-          width: 200,
-          height: 100,
-          fill: '#fff',
-          stroke: '#10b981',
-          strokeWidth: 2,
-          rx: 12,
-          ry: 12,
-        }),
-        new fabric.IText('🌐 Web Link', {
-          fontSize: 14,
-          left: 20,
-          top: 20,
-          fill: '#059669',
-          fontWeight: 'bold',
-        }),
-        new fabric.IText(url.substring(0, 30) + (url.length > 30 ? '...' : ''), {
-          fontSize: 10,
-          left: 20,
-          top: 50,
-          fill: '#666',
-        }),
-        new fabric.IText('Click to open', {
-          fontSize: 10,
-          left: 20,
-          top: 70,
-          fill: '#3b82f6',
-          underline: true,
-        })
-      ], {
-        left: 100,
-        top: 100,
-      });
+        new fabric.Rect({ width: 240, height: 100, fill: '#fff', stroke: '#10b981', strokeWidth: 2, rx: 12, ry: 12, originX: 'left', originY: 'top' }),
+        new fabric.FabricText('🌐 웹 링크', { fontSize: 15, left: 18, top: 16, fill: '#059669', fontWeight: 'bold', fontFamily: KOREAN_FONT, originX: 'left', originY: 'top' }),
+        new fabric.FabricText(display, { fontSize: 11, left: 18, top: 46, fill: '#666', originX: 'left', originY: 'top' }),
+        new fabric.FabricText('선택하면 열기 버튼이 나타납니다', { fontSize: 10, left: 18, top: 70, fill: '#3b82f6', fontFamily: KOREAN_FONT, originX: 'left', originY: 'top' }),
+      ]);
       (group as any).isWebLink = true;
       (group as any).url = url;
-      canvas.add(group);
-      canvas.setActiveObject(group);
-      canvas.requestRenderAll();
+      placeAtCenter(group);
+      addAndSelect(group);
     },
     addShape: (type) => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-
-      const commonProps = {
-        left: 150,
-        top: 150,
-        fill: 'transparent',
-        stroke: color,
-        strokeWidth: brushSize,
-        cornerColor: '#3b82f6',
-        cornerSize: 10,
-        transparentCorners: false,
+      const common = {
+        fill: 'transparent', stroke: colorRef.current, strokeWidth: brushSizeRef.current,
+        cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false, strokeUniform: true,
       };
-
-      let shape;
+      let shape: fabric.FabricObject | null = null;
       switch (type) {
-        case 'rect':
-          shape = new fabric.Rect({ ...commonProps, width: 100, height: 100 });
-          break;
-        case 'circle':
-          shape = new fabric.Circle({ ...commonProps, radius: 50 });
-          break;
-        case 'ellipse':
-          shape = new fabric.Ellipse({ ...commonProps, rx: 80, ry: 40 });
-          break;
-        case 'triangle':
-          shape = new fabric.Triangle({ ...commonProps, width: 100, height: 100 });
-          break;
+        case 'rect': shape = new fabric.Rect({ ...common, width: 140, height: 100 }); break;
+        case 'circle': shape = new fabric.Circle({ ...common, radius: 60 }); break;
+        case 'ellipse': shape = new fabric.Ellipse({ ...common, rx: 90, ry: 50 }); break;
+        case 'triangle': shape = new fabric.Triangle({ ...common, width: 120, height: 100 }); break;
         case 'polygon':
-          const points = [
-            { x: 50, y: 0 }, { x: 100, y: 40 }, { x: 80, y: 100 }, 
-            { x: 20, y: 100 }, { x: 0, y: 40 }
-          ];
-          shape = new fabric.Polygon(points, { ...commonProps });
+          shape = new fabric.Polygon([{ x: 50, y: 0 }, { x: 100, y: 40 }, { x: 80, y: 100 }, { x: 20, y: 100 }, { x: 0, y: 40 }], common);
           break;
+        case 'line':
+          shape = new fabric.Line([0, 0, 200, 0], { ...common, fill: undefined, strokeLineCap: 'round' });
+          break;
+        case 'arrow': {
+          const w = Math.max(2, brushSizeRef.current);
+          const head = 8 + w * 2.5;
+          shape = new fabric.Path(`M 0 0 L 200 0 M ${200 - head} ${-head * 0.6} L 200 0 L ${200 - head} ${head * 0.6}`, {
+            ...common, fill: '', strokeLineCap: 'round', strokeLineJoin: 'round',
+          });
+          break;
+        }
       }
-
       if (shape) {
-        canvas.add(shape);
-        canvas.setActiveObject(shape);
-        canvas.requestRenderAll();
+        placeAtCenter(shape);
+        addAndSelect(shape);
       }
-    },
-    addText: () => {
-      const canvas = fabricRef.current;
-      if (!canvas) return;
-
-      const text = new fabric.IText('내용을 입력하세요', {
-        left: 100,
-        top: 100,
-        fontFamily: 'Arial',
-        fontSize: 24,
-        fill: color,
-        cornerColor: '#3b82f6',
-      });
-      canvas.add(text);
-      canvas.setActiveObject(text);
-      canvas.requestRenderAll();
     },
     clear: () => {
       const canvas = fabricRef.current;
-      if (canvas) {
-        saveHistory();
-        canvas.getObjects().slice().forEach(obj => canvas.remove(obj));
-        
-        // Reset zoom and pan
-        canvas.setZoom(1);
-        const vpt = canvas.viewportTransform;
-        if (vpt) {
-          vpt[4] = 0;
-          vpt[5] = 0;
-        }
-        
-        canvas.requestRenderAll();
-        onCanvasChange?.(canvas);
-        onZoomChange?.(1);
-      }
+      if (!canvas) return;
+      canvas.discardActiveObject();
+      canvas.remove(...canvas.getObjects().filter(o => !isHelper(o)));
+      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      canvas.requestRenderAll();
+      propsRef.current.onZoomChange?.(1);
+      commitChange();
     },
     copy: handleCopy,
     paste: handlePaste,
@@ -864,884 +637,568 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     deleteSelected: handleDeleteSelected,
     group: handleGroup,
     ungroup: handleUngroup,
-  }));
+  }), [undo, redo, commitChange, applyToolState, selectObjects, placeAtCenter, addAndSelect, getCanvas, handleImagesAdd, handleCopy, handlePaste, handleCut, handleDeleteSelected, handleGroup, handleUngroup]);
 
-  // Initialize Canvas
+  // ---------- 캔버스 초기화 (한 번) ----------
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
+    const container = containerRef.current;
 
     const canvas = new fabric.Canvas(canvasRef.current, {
-      width: containerRef.current.clientWidth,
-      height: containerRef.current.clientHeight,
-      backgroundColor: '#ffffff',
+      width: container.clientWidth,
+      height: container.clientHeight,
+      backgroundColor: 'transparent',
       allowTouchScrolling: false,
       stopContextMenu: true,
-      enablePointerEvents: false, // Disable to treat Pencil like a finger (Touch Events)
-      renderOnAddRemove: false,
+      enablePointerEvents: false, // 펜슬을 손가락처럼 처리 (Touch Events)
       skipTargetFind: true,
       fireMiddleClick: false,
       fireRightClick: false,
       imageSmoothingEnabled: true,
       preserveObjectStacking: true,
       enableRetinaScaling: true,
-      stateful: false,
       selection: false,
       containerClass: 'whiteboard-canvas-container',
     });
-
-    // Force hardware acceleration and optimize touch action
-    try {
-      if (containerRef.current) {
-        containerRef.current.style.touchAction = 'none';
-        containerRef.current.style.userSelect = 'none';
-        containerRef.current.style.webkitUserSelect = 'none';
-        
-        // Apply to all canvas children
-        const canvases = containerRef.current.querySelectorAll('canvas');
-        canvases.forEach(c => {
-          c.style.touchAction = 'none';
-        });
-      }
-    } catch (e) {
-      console.warn("Could not set touch action styles", e);
-    }
-
     fabricRef.current = canvas;
-    // Enable object caching for better performance with many objects
-    fabric.Object.prototype.objectCaching = true;
+    fabric.FabricObject.ownDefaults.objectCaching = true;
 
-    canvas.on('mouse:down', () => { 
+    container.style.touchAction = 'none';
+    container.style.userSelect = 'none';
+    container.querySelectorAll('canvas').forEach(c => { (c as HTMLCanvasElement).style.touchAction = 'none'; });
+
+    // --- 객체 이벤트 ---
+    canvas.on('object:added', e => {
+      const obj = e.target;
+      if (!obj || isHelper(obj)) return;
+      if (!(obj as any).id) (obj as any).id = newId();
+      if (obj.type !== 'path') commitChange(); // path는 path:created에서 처리
+    });
+    canvas.on('object:modified', () => commitChange());
+    canvas.on('object:removed', e => {
+      if (isHelper(e.target)) return;
+      if (isRestoringRef.current || isLoadingRef.current) return;
+      commitChange();
+    });
+
+    const emitSelection = () => {
+      const active = canvas.getActiveObject();
+      setHasSelection(!!active);
+      setCanGroup(active instanceof fabric.ActiveSelection);
+      setIsGroupSelected(!!active && active instanceof fabric.Group && !(active instanceof fabric.ActiveSelection) && !(active as any).isAudio && !(active as any).isWebLink);
+      const target: any = canvas.getActiveObjects()[0];
+      const cb = propsRef.current.onSelectionChange;
+      if (!cb) return;
+      if (target?.isVideo) cb({ type: 'video', element: target.getElement() });
+      else if (target?.isAudio) cb({ type: 'audio', url: target.audioUrl });
+      else if (target?.isWebLink) cb({ type: 'weblink', url: target.url });
+      else cb({ type: 'none' });
+    };
+    canvas.on('selection:created', emitSelection);
+    canvas.on('selection:updated', emitSelection);
+    canvas.on('selection:cleared', emitSelection);
+
+    // --- 확대/축소 (휠) ---
+    canvas.on('mouse:wheel', opt => {
+      const e = opt.e as WheelEvent;
+      if (!e || !e.deltaY) return;
+      let zoom = canvas.getZoom() * 0.999 ** e.deltaY;
+      zoom = Math.min(20, Math.max(0.05, zoom));
+      canvas.zoomToPoint(new fabric.Point(e.offsetX, e.offsetY), zoom);
+      canvas.requestRenderAll();
+      propsRef.current.onZoomChange?.(zoom);
+      forceRender(n => n + 1);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    // --- 도구별 포인터 처리 ---
+    const pan = { spaceDown: false, dragging: false, lastX: 0, lastY: 0, cursorSent: 0 };
+    const clientXY = (e: any) => ({
+      x: e.clientX !== undefined ? e.clientX : e.touches?.[0]?.clientX ?? 0,
+      y: e.clientY !== undefined ? e.clientY : e.touches?.[0]?.clientY ?? 0,
+    });
+
+    const eraseAt = (p: fabric.Point) => {
+      const radius = Math.max(10, brushSizeRef.current * 2);
+      const victims: fabric.FabricObject[] = [];
+      canvas.getObjects().forEach(obj => {
+        if (isHelper(obj) || isLocked(obj) || !obj.visible) return;
+        if (!ERASABLE_TYPES.has(obj.type)) return; // 사진·PDF·미디어 카드는 지우개로 지우지 않음
+        if (obj.type === 'path') {
+          const pts = getPathScenePoints(obj as fabric.Path);
+          const tol = radius + ((obj.strokeWidth || 1) * (obj.scaleX || 1)) / 2;
+          for (let i = 0; i < pts.length; i++) {
+            const a = pts[i], b = pts[i + 1] || pts[i];
+            if (distToSegment(p, a, b) <= tol) { victims.push(obj); break; }
+          }
+        } else if (obj.containsPoint(p)) {
+          victims.push(obj);
+        } else {
+          const r = obj.getBoundingRect();
+          if (p.x >= r.left - radius && p.x <= r.left + r.width + radius && p.y >= r.top - radius && p.y <= r.top + r.height + radius && obj.type === 'line') {
+            victims.push(obj);
+          }
+        }
+      });
+      if (victims.length) {
+        isRestoringRef.current = true; // 지우는 동안 개별 기록 방지
+        canvas.remove(...victims);
+        isRestoringRef.current = false;
+        erasedRef.current = true;
+      }
+    };
+
+    const showEraserCursor = (p: fabric.Point) => {
+      const r = Math.max(10, brushSizeRef.current * 2);
+      if (!eraserCursorRef.current) {
+        eraserCursorRef.current = new fabric.Circle({
+          radius: r, fill: 'rgba(220,220,220,0.5)', stroke: 'rgba(100,100,100,0.8)', strokeWidth: 1,
+          originX: 'center', originY: 'center', selectable: false, evented: false, excludeFromExport: true,
+        });
+        canvas.add(eraserCursorRef.current);
+      }
+      eraserCursorRef.current.set({ left: p.x, top: p.y, radius: r, strokeWidth: 1 / canvas.getZoom() });
+      canvas.bringObjectToFront(eraserCursorRef.current);
+      canvas.requestRenderAll();
+    };
+
+    canvas.on('mouse:down', opt => {
       isDrawingRef.current = true;
-      if (onDrawingStateChange) onDrawingStateChange(true);
-    });
-    canvas.on('mouse:up', () => { 
-      isDrawingRef.current = false;
-      if (onDrawingStateChange) onDrawingStateChange(false);
-      // Trigger updates after drawing ends
-      saveHistory();
-      notifyCanvasChange();
-    });
-
-    // Initial state save
-    const initialJson = canvas.toObject(['id', 'isVideo', 'videoElement', 'isAudio', 'audioUrl', 'isWebLink', 'url']);
-    setUndoStack([initialJson]);
-
-    // History Listeners
-    canvas.on('object:added', (e) => {
-      if (!(e.target as any).id) {
-        (e.target as any).id = Math.random().toString(36).substr(2, 9);
+      propsRef.current.onDrawingStateChange?.(true);
+      const t = toolRef.current;
+      const e: any = opt.e;
+      if (pan.spaceDown || t === 'pan') {
+        const { x, y } = clientXY(e);
+        pan.dragging = true; pan.lastX = x; pan.lastY = y;
+        canvas.setCursor('grabbing');
+        return;
       }
-      // For paths, we rely on path:created to avoid double saving
-      if (e.target?.type !== 'path') {
-        saveHistory();
-        notifyCanvasChange();
-      }
-    });
-    canvas.on('object:modified', () => {
-      saveHistory();
-      notifyCanvasChange();
-    });
-    canvas.on('object:removed', () => {
-      if (isRestoringRef.current) return;
-      saveHistory();
-      notifyCanvasChange();
-    });
-    
-    const updateSelectionState = () => {
-      const activeObject = canvas.getActiveObject();
-      setHasSelection(!!activeObject);
-      setCanGroup(activeObject?.type === 'activeSelection');
-      setIsGroupSelected(activeObject?.type === 'group');
-    };
-
-    canvas.on('selection:created', (e) => {
-      updateSelectionState();
-      const target = e.selected?.[0];
-      if (target) {
-        if ((target as any).isVideo) {
-          onSelectionChange?.({ type: 'video', element: (target as any).videoElement });
-        } else if ((target as any).isAudio) {
-          onSelectionChange?.({ type: 'audio', url: (target as any).audioUrl });
-        } else if ((target as any).isWebLink) {
-          onSelectionChange?.({ type: 'weblink', url: (target as any).url });
-        } else {
-          onSelectionChange?.({ type: 'none' });
-        }
-      }
-    });
-
-    canvas.on('selection:updated', (e) => {
-      updateSelectionState();
-      const target = e.selected?.[0];
-      if (target) {
-        if ((target as any).isVideo) {
-          onSelectionChange?.({ type: 'video', element: (target as any).videoElement });
-        } else if ((target as any).isAudio) {
-          onSelectionChange?.({ type: 'audio', url: (target as any).audioUrl });
-        } else if ((target as any).isWebLink) {
-          onSelectionChange?.({ type: 'weblink', url: (target as any).url });
-        } else {
-          onSelectionChange?.({ type: 'none' });
-        }
-      }
-    });
-
-    canvas.on('selection:cleared', () => {
-      updateSelectionState();
-      onSelectionChange?.({ type: 'none' });
-    });
-
-    // Handle Zoom
-    canvas.on('mouse:wheel', (opt) => {
-      try {
-        const e = opt.e as WheelEvent;
-        if (!e) return;
-        
-        const delta = e.deltaY || (e as any).wheelDelta || 0;
-        if (typeof delta !== 'number' || isNaN(delta) || delta === 0) return;
-        
-        let zoom = canvas.getZoom();
-        zoom *= 0.999 ** delta;
-        if (zoom > 20) zoom = 20;
-        if (zoom < 0.01) zoom = 0.01;
-        
-        if ((opt as any).viewportPoint) {
-          canvas.zoomToPoint((opt as any).viewportPoint, zoom);
-        } else if (containerRef.current) {
-          const rect = containerRef.current.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-          canvas.zoomToPoint(new fabric.Point(x, y), zoom);
-        }
-        
+      const p = canvas.getScenePoint(e);
+      if (t === 'laser') {
+        laserRef.current = new fabric.Circle({
+          radius: 7 / canvas.getZoom(), fill: '#ef4444', left: p.x, top: p.y, originX: 'center', originY: 'center',
+          selectable: false, evented: false, excludeFromExport: true,
+          shadow: new fabric.Shadow({ color: '#ef4444', blur: 14, offsetX: 0, offsetY: 0 }),
+        });
+        canvas.add(laserRef.current);
         canvas.requestRenderAll();
-        
-        onZoomChange?.(zoom);
-        notifyCanvasChange();
-        
-        if (e.preventDefault) e.preventDefault();
-        if (e.stopPropagation) e.stopPropagation();
-      } catch (err) {
-        console.error("Zoom error:", err);
-      }
-    });
-
-    // Handle Panning (Space + Drag)
-    const panningState = {
-      isPanning: false,
-      isDragging: false,
-      lastPosX: 0,
-      lastPosY: 0,
-      cursorLastSend: 0,
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        canvas.selection = false;
-        canvas.defaultCursor = 'grab';
-        panningState.isPanning = true;
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        canvas.selection = true;
-        canvas.defaultCursor = 'default';
-        panningState.isPanning = false;
-        panningState.isDragging = false;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-
-    canvas.on('mouse:down', (opt) => {
-      if (!opt.e) return;
-      const e = opt.e as any;
-      if (panningState.isPanning || toolRef.current === 'pan') {
-        const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches.length > 0 ? e.touches[0].clientX : 0);
-        const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches.length > 0 ? e.touches[0].clientY : 0);
-        
-        panningState.isDragging = true;
-        panningState.lastPosX = clientX;
-        panningState.lastPosY = clientY;
-      }
-    });
-
-    canvas.on('mouse:move', (opt) => {
-      if (!opt.e) return;
-      const e = opt.e as any;
-      if (panningState.isDragging && (panningState.isPanning || toolRef.current === 'pan')) {
-        const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches.length > 0 ? e.touches[0].clientX : 0);
-        const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches.length > 0 ? e.touches[0].clientY : 0);
-        
-        const vpt = canvas.viewportTransform!;
-        vpt[4] += clientX - panningState.lastPosX;
-        vpt[5] += clientY - panningState.lastPosY;
+      } else if (t === 'eraser') {
+        isErasingRef.current = true;
+        erasedRef.current = false;
+        showEraserCursor(p);
+        eraseAt(p);
+      } else if (t === 'bucket') {
+        const target: any = opt.target;
+        if (!target || isLocked(target) || target.type === 'image' || target instanceof fabric.Group) return;
+        if (TEXT_TYPES.has(target.type)) target.set('fill', colorRef.current);
+        else if (SHAPE_TYPES.has(target.type)) target.set('fill', colorRef.current);
+        else if (target.type === 'path') {
+          const pts = getPathScenePoints(target);
+          const closed = pts.length > 2 && Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 40;
+          target.set(closed ? 'fill' : 'stroke', colorRef.current);
+        } else target.set('stroke', colorRef.current);
         canvas.requestRenderAll();
-        notifyCanvasChange();
-        panningState.lastPosX = clientX;
-        panningState.lastPosY = clientY;
-      }
-
-      // Multiplayer Live Cursors logic
-      const mp = multiplayerRef.current;
-      if (mp && mp.status === 'connected' && mp.myPeerId) {
-        if (!panningState.cursorLastSend) panningState.cursorLastSend = 0;
-        const now = Date.now();
-        if (now - panningState.cursorLastSend > 50) {
-          panningState.cursorLastSend = now;
-          const pos = canvas.getScenePoint(e);
-          mp.broadcast({
-            type: 'cursor',
-            payload: {
-              id: mp.myPeerId,
-              name: '사용자',
-              x: pos.x,
-              y: pos.y,
-              color: '#3b82f6'
-            }
-          });
+        commitChange();
+      } else if (t === 'eyedropper') {
+        try {
+          const el = canvas.lowerCanvasEl;
+          const ctx = el.getContext('2d', { willReadFrequently: true } as any) as CanvasRenderingContext2D;
+          const rect = el.getBoundingClientRect();
+          const { x, y } = clientXY(e);
+          const px = ctx.getImageData((x - rect.left) * (el.width / rect.width), (y - rect.top) * (el.height / rect.height), 1, 1).data;
+          let hex = '#' + ((1 << 24) + (px[0] << 16) + (px[1] << 8) + px[2]).toString(16).slice(1);
+          if (px[3] === 0) hex = backgroundRef.current === 'dark' ? '#1a202c' : '#ffffff';
+          propsRef.current.onColorPicked?.(hex);
+        } catch (err) {
+          console.error('스포이트 오류', err);
         }
+      }
+    });
+
+    canvas.on('mouse:move', opt => {
+      const e: any = opt.e;
+      const t = toolRef.current;
+      if (pan.dragging) {
+        const { x, y } = clientXY(e);
+        canvas.relativePan(new fabric.Point(x - pan.lastX, y - pan.lastY));
+        pan.lastX = x; pan.lastY = y;
+        forceRender(n => n + 1);
+        return;
+      }
+      const p = canvas.getScenePoint(e);
+      if (t === 'laser' && laserRef.current) {
+        laserRef.current.set({ left: p.x, top: p.y });
+        canvas.bringObjectToFront(laserRef.current);
+        canvas.requestRenderAll();
+      } else if (t === 'eraser') {
+        showEraserCursor(p);
+        if (isErasingRef.current) eraseAt(p);
+      }
+      const now = Date.now();
+      if (propsRef.current.onPointerMove && now - pan.cursorSent > 50) {
+        pan.cursorSent = now;
+        propsRef.current.onPointerMove(p.x, p.y);
       }
     });
 
     canvas.on('mouse:up', () => {
-      panningState.isDragging = false;
+      const wasPanning = pan.dragging;
+      pan.dragging = false;
+      if (wasPanning) canvas.setCursor(toolRef.current === 'pan' || pan.spaceDown ? 'grab' : 'default');
+      if (laserRef.current) {
+        canvas.remove(laserRef.current);
+        laserRef.current = null;
+        canvas.requestRenderAll();
+      }
+      const erased = isErasingRef.current && erasedRef.current;
+      isErasingRef.current = false;
+      isDrawingRef.current = false;
+      propsRef.current.onDrawingStateChange?.(false);
+      if (erased) { erasedRef.current = false; commitChange(); }
+      if (pendingHistoryRef.current) { pendingHistoryRef.current = false; recordHistory(); }
     });
 
-    // Multi-touch Zoom and Pan
-    let touchState = {
-      isMultiTouch: false,
-      initialDistance: 0,
-      initialZoom: 1,
-      lastMidpointX: 0,
-      lastMidpointY: 0,
-    };
+    canvas.on('mouse:out', () => {
+      if (eraserCursorRef.current) {
+        canvas.remove(eraserCursorRef.current);
+        eraserCursorRef.current = null;
+        canvas.requestRenderAll();
+      }
+    });
 
-    const getDistance = (touches: TouchList) => {
-      const dx = touches[0].clientX - touches[1].clientX;
-      const dy = touches[0].clientY - touches[1].clientY;
-      return Math.sqrt(dx * dx + dy * dy);
-    };
+    // --- 펜으로 그린 선 처리 (올가미 포함) ---
+    canvas.on('path:created', (e: any) => {
+      const path: fabric.Path = e.path;
+      (path as any).id = (path as any).id || newId();
+      const t = toolRef.current;
+      if (t === 'lasso') {
+        const poly = getPathScenePoints(path);
+        isRestoringRef.current = true;
+        canvas.remove(path);
+        isRestoringRef.current = false;
+        const picked = canvas.getObjects().filter(o =>
+          !isHelper(o) && !isLocked(o) && o.visible && pointInPolygon(o.getCenterPoint(), poly));
+        if (picked.length > 0) selectObjects(picked);
+        else toast.info('올가미 안에 선택할 객체가 없습니다.');
+        return;
+      }
+      if (t === 'dashed') path.set({ strokeDashArray: [12, 8] });
+      if (t === 'highlighter') path.set({ globalCompositeOperation: 'multiply' });
+      path.set({ objectCaching: true, strokeUniform: true, selectable: false, evented: false });
+      requestAnimationFrame(() => {
+        canvas.requestRenderAll();
+        commitChange();
+      });
+    });
 
-    const getMidpoint = (touches: TouchList) => {
-      return {
-        x: (touches[0].clientX + touches[1].clientX) / 2,
-        y: (touches[0].clientY + touches[1].clientY) / 2,
-      };
+    // --- 키보드 ---
+    const isTyping = () => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return false;
+      return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
     };
-
-    const handleTouchStart = (e: TouchEvent) => {
-      try {
-        if (e.touches.length === 2) {
-          if (e.cancelable) e.preventDefault(); // Prevent default browser zoom/scroll
-          touchState.isMultiTouch = true;
-          touchState.initialDistance = getDistance(e.touches);
-          touchState.initialZoom = canvas.getZoom();
-          const midpoint = getMidpoint(e.touches);
-          touchState.lastMidpointX = midpoint.x;
-          touchState.lastMidpointY = midpoint.y;
-          
-          // Disable drawing/selection temporarily during multi-touch
-          canvas.isDrawingMode = false;
-          canvas.selection = false;
-        }
-      } catch (err) {
-        console.error("Touch start error:", err);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTyping()) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (e.code === 'Space' && !pan.spaceDown) {
+        pan.spaceDown = true;
+        canvas.setCursor('grab');
+        canvas.defaultCursor = 'grab';
+        e.preventDefault();
+        return;
+      }
+      if (mod && key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if (mod && ((key === 'z' && e.shiftKey) || key === 'y')) { e.preventDefault(); redo(); }
+      else if (mod && key === 'c') handleCopy();
+      else if (mod && key === 'x') handleCut();
+      else if (mod && key === 'v') { if (globalClipboard) { e.preventDefault(); handlePaste(); } }
+      else if (mod && key === 'g' && !e.shiftKey) { e.preventDefault(); handleGroup(); }
+      else if (mod && key === 'g' && e.shiftKey) { e.preventDefault(); handleUngroup(); }
+      else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (canvas.getActiveObjects().length) { e.preventDefault(); handleDeleteSelected(); }
+      }
+      else if (e.key === 'Escape') { canvas.discardActiveObject(); canvas.requestRenderAll(); }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        pan.spaceDown = false;
+        pan.dragging = false;
+        applyToolState();
       }
     };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
-    const handleTouchMove = (e: TouchEvent) => {
-      try {
-        if (e.touches.length === 2 && touchState.isMultiTouch) {
-          if (e.cancelable) e.preventDefault();
-          
-          const currentDistance = getDistance(e.touches);
-          const midpoint = getMidpoint(e.touches);
-          
-          // Calculate Zoom
-          const scale = currentDistance / touchState.initialDistance;
-          let newZoom = touchState.initialZoom * scale;
-          if (newZoom > 20) newZoom = 20;
-          if (newZoom < 0.01) newZoom = 0.01;
-
-          // Calculate Pan
-          const dx = midpoint.x - touchState.lastMidpointX;
-          const dy = midpoint.y - touchState.lastMidpointY;
-
-          // Apply Pan
-          const vpt = canvas.viewportTransform!;
-          vpt[4] += dx;
-          vpt[5] += dy;
-
-          // Apply Zoom at midpoint
-          if (containerRef.current) {
-            const rect = containerRef.current.getBoundingClientRect();
-            const zoomPoint = new fabric.Point(midpoint.x - rect.left, midpoint.y - rect.top);
-            canvas.zoomToPoint(zoomPoint, newZoom);
-          }
-
-          canvas.requestRenderAll();
-          
-          touchState.lastMidpointX = midpoint.x;
-          touchState.lastMidpointY = midpoint.y;
-          
-          onZoomChange?.(newZoom);
-          notifyCanvasChange();
-        }
-      } catch (err) {
-        console.error("Touch move error:", err);
+    // --- 두 손가락 확대/이동 + 손바닥 무시 ---
+    const touch = { multi: false, startDist: 0, startZoom: 1, lastMidX: 0, lastMidY: 0 };
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const mid = (t: TouchList) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        if (e.cancelable) e.preventDefault();
+        touch.multi = true;
+        touch.startDist = dist(e.touches);
+        touch.startZoom = canvas.getZoom();
+        const m = mid(e.touches);
+        touch.lastMidX = m.x; touch.lastMidY = m.y;
+        canvas.isDrawingMode = false;
+        canvas.selection = false;
       }
     };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      try {
-        if (touchState.isMultiTouch && e.touches.length < 2) {
-          touchState.isMultiTouch = false;
-          
-          // Restore drawing/selection mode based on current tool
-          const currentTool = toolRef.current;
-          canvas.isDrawingMode = currentTool === 'pen' || currentTool === 'eraser' || currentTool === 'pencil' || currentTool === 'fountain' || currentTool === 'ballpoint' || currentTool === 'dashed' || currentTool === 'highlighter' || currentTool === 'cut';
-          canvas.selection = currentTool === 'select' || currentTool === 'cut';
-        }
-      } catch (err) {
-        console.error("Touch end error:", err);
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !touch.multi) return;
+      if (e.cancelable) e.preventDefault();
+      const m = mid(e.touches);
+      canvas.relativePan(new fabric.Point(m.x - touch.lastMidX, m.y - touch.lastMidY));
+      const zoom = Math.min(20, Math.max(0.05, touch.startZoom * (dist(e.touches) / touch.startDist)));
+      const rect = container.getBoundingClientRect();
+      canvas.zoomToPoint(new fabric.Point(m.x - rect.left, m.y - rect.top), zoom);
+      canvas.requestRenderAll();
+      touch.lastMidX = m.x; touch.lastMidY = m.y;
+      propsRef.current.onZoomChange?.(zoom);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (touch.multi && e.touches.length < 2) {
+        touch.multi = false;
+        applyToolState();
+        forceRender(n => n + 1);
       }
     };
-
-    let lastPenInteractionTime = 0;
-
+    let lastPenTime = 0;
     const blockPenHover = (e: any) => {
       if (e.pointerType === 'pen') {
-        lastPenInteractionTime = Date.now();
-        if (e.pressure === 0 || e.buttons === 0) {
-          e.stopPropagation();
-          e.preventDefault();
-        }
-      } else if (e.pointerType === 'touch' && Date.now() - lastPenInteractionTime < 1500) {
-        // Palm Rejection: Ignore touch pointers for 1.5s after using Apple Pencil
-        e.stopPropagation();
+        lastPenTime = Date.now();
+        if (e.pressure === 0 || e.buttons === 0) { e.stopPropagation(); e.preventDefault(); }
+      } else if (e.pointerType === 'touch' && Date.now() - lastPenTime < 1500) {
+        e.stopPropagation(); // 펜 사용 직후 손바닥 터치 무시
       }
     };
-
-    const blockTouchFromFabric = (e: TouchEvent) => {
-      let hasStylus = false;
+    const blockPalm = (e: TouchEvent) => {
+      let stylus = false;
       for (let i = 0; i < e.touches.length; i++) {
-        if ((e.touches[i] as any).touchType === 'stylus') {
-          hasStylus = true;
-          lastPenInteractionTime = Date.now();
-        }
+        if ((e.touches[i] as any).touchType === 'stylus') { stylus = true; lastPenTime = Date.now(); }
       }
-      // Palm Rejection: Block single-finger skin touches shortly after Pen usage
-      if (e.touches.length === 1 && !hasStylus && Date.now() - lastPenInteractionTime < 1500) {
-        e.stopPropagation();
-      }
+      if (e.touches.length === 1 && !stylus && Date.now() - lastPenTime < 1500) e.stopPropagation();
     };
+    const cap = { capture: true, passive: false } as AddEventListenerOptions;
+    container.addEventListener('pointerdown', blockPenHover, cap);
+    container.addEventListener('pointermove', blockPenHover, cap);
+    container.addEventListener('touchstart', blockPalm, cap);
+    container.addEventListener('touchmove', blockPalm, cap);
+    container.addEventListener('touchstart', onTouchStart, { passive: false });
+    container.addEventListener('touchmove', onTouchMove, { passive: false });
+    container.addEventListener('touchend', onTouchEnd);
+    container.addEventListener('touchcancel', onTouchEnd);
 
-    const touchTarget = containerRef.current;
-    if (touchTarget) {
-      touchTarget.addEventListener('pointerdown', blockPenHover, { capture: true, passive: false });
-      touchTarget.addEventListener('pointermove', blockPenHover, { capture: true, passive: false });
-      touchTarget.addEventListener('touchstart', blockTouchFromFabric, { capture: true, passive: false });
-      touchTarget.addEventListener('touchmove', blockTouchFromFabric, { capture: true, passive: false });
-      
-      touchTarget.addEventListener('touchstart', handleTouchStart, { passive: false });
-      touchTarget.addEventListener('touchmove', handleTouchMove, { passive: false });
-      touchTarget.addEventListener('touchend', handleTouchEnd);
-      touchTarget.addEventListener('touchcancel', handleTouchEnd);
-    }
-
-    // Handle Resize
-    const resizeObserver = new ResizeObserver(() => {
-      if (containerRef.current && fabricRef.current) {
-        fabricRef.current.setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
-        notifyCanvasChange();
-      }
+    // --- 크기 변경 ---
+    const ro = new ResizeObserver(() => {
+      canvas.setDimensions({ width: container.clientWidth, height: container.clientHeight });
+      canvas.requestRenderAll();
     });
-    resizeObserver.observe(containerRef.current);
-
-    // Initial Data
-    if (initialData) {
-      canvas.loadFromJSON(initialData).then(() => {
-        canvas.renderAll();
-        updateObjectsList();
-        notifyCanvasChange();
-      });
-    } else {
-      notifyCanvasChange();
-    }
+    ro.observe(container);
 
     return () => {
-      if (touchTarget) {
-        touchTarget.removeEventListener('touchstart', handleTouchStart);
-        touchTarget.removeEventListener('touchmove', handleTouchMove);
-        touchTarget.removeEventListener('touchend', handleTouchEnd);
-        touchTarget.removeEventListener('touchcancel', handleTouchEnd);
-      }
-      resizeObserver.disconnect();
+      container.removeEventListener('pointerdown', blockPenHover, cap);
+      container.removeEventListener('pointermove', blockPenHover, cap);
+      container.removeEventListener('touchstart', blockPalm, cap);
+      container.removeEventListener('touchmove', blockPalm, cap);
+      container.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('touchmove', onTouchMove);
+      container.removeEventListener('touchend', onTouchEnd);
+      container.removeEventListener('touchcancel', onTouchEnd);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      ro.disconnect();
+      if (notifyTimerRef.current) clearTimeout(notifyTimerRef.current);
+      if (historyTimerRef.current) clearTimeout(historyTimerRef.current);
       canvas.dispose();
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      fabricRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update Tool & Brush
+  // ---------- 슬라이드 불러오기 (슬라이드 전환 또는 외부 변경 시) ----------
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-
-    let laserPointer: fabric.Circle | null = null;
-
-    const handleLaserDown = (options: any) => {
-      if (tool !== 'laser') return;
-      
-      const pointerPos = canvas.getScenePoint(options.e);
-
-      laserPointer = new fabric.Circle({
-        radius: 6,
-        fill: 'red',
-        left: pointerPos.x,
-        top: pointerPos.y,
-        selectable: false,
-        evented: false,
-        originX: 'center',
-        originY: 'center',
-        shadow: new fabric.Shadow({ color: 'red', blur: 12, offsetX: 0, offsetY: 0 })
-      });
-      
-      canvas.add(laserPointer);
-      canvas.bringObjectToFront(laserPointer);
-      canvas.requestRenderAll();
-    };
-
-    const handleLaserMove = (options: any) => {
-      if (tool !== 'laser' || !laserPointer) return;
-      const pointerPos = canvas.getScenePoint(options.e);
-      laserPointer.set({ left: pointerPos.x, top: pointerPos.y });
-      canvas.bringObjectToFront(laserPointer);
-      canvas.requestRenderAll();
-    };
-
-    const handleLaserUp = () => {
-      if (tool !== 'laser' || !laserPointer) return;
-      canvas.remove(laserPointer);
-      laserPointer = null;
-      canvas.requestRenderAll();
-    };
-
-    const handleBucketFill = (options: any) => {
-      if (tool !== 'bucket' || !options.target) return;
-      options.target.set('fill', color);
-      canvas.requestRenderAll();
-    };
-
-    let eraserCircle: fabric.Circle | null = null;
-    let isErasing = false;
-
-    const eraseAtPointer = (e: any) => {
-      if (!eraserCircle) return;
-      const pointerPos = canvas.getScenePoint(e);
-      eraserCircle.set({ left: pointerPos.x, top: pointerPos.y });
-      eraserCircle.setCoords();
-
-      const objects = canvas.getObjects();
-      let removed = false;
-      
-      objects.forEach(obj => {
-         if (obj === eraserCircle) return;
-         if (obj.type === 'path' || obj.type === 'i-text' || obj.type === 'text') {
-            if (obj.intersectsWithObject(eraserCircle) || obj.containsPoint(pointerPos)) {
-               canvas.remove(obj);
-               removed = true;
-            }
-         }
-      });
-      if (removed) {
-         canvas.requestRenderAll();
-         notifyCanvasChange(); // Sync the deletion immediately via WebRTC
-      }
-    };
-
-    const handleEraserDown = (options: any) => {
-      if (tool !== 'eraser') return;
-      isErasing = true;
-      
-      if (!eraserCircle) {
-         eraserCircle = new fabric.Circle({
-            radius: brushSize,
-            fill: 'rgba(220, 220, 220, 0.7)',
-            selectable: false,
-            evented: false,
-            originX: 'center',
-            originY: 'center',
-            stroke: 'rgba(100, 100, 100, 0.8)',
-            strokeWidth: 1,
-         });
-         canvas.add(eraserCircle);
-      }
-      eraseAtPointer(options.e);
-    };
-
-    const handleEraserMove = (options: any) => {
-      if (tool !== 'eraser') return;
-      const pointerPos = canvas.getScenePoint(options.e);
-      
-      if (!eraserCircle) {
-         eraserCircle = new fabric.Circle({
-            radius: brushSize,
-            fill: 'rgba(220, 220, 220, 0.7)',
-            selectable: false,
-            evented: false,
-            originX: 'center',
-            originY: 'center',
-            stroke: 'rgba(100, 100, 100, 0.8)',
-            strokeWidth: 1,
-         });
-         canvas.add(eraserCircle);
-      }
-      
-      eraserCircle.set({ left: pointerPos.x, top: pointerPos.y });
-      canvas.bringObjectToFront(eraserCircle);
-      canvas.requestRenderAll();
-
-      if (isErasing) {
-         eraseAtPointer(options.e);
-      }
-    };
-
-    const handleEraserUp = () => {
-      if (tool !== 'eraser') return;
-      isErasing = false;
-      saveHistory(); // commit deletion to history
-    };
-
-    const handleEyedropper = (options: any) => {
-      if (tool !== 'eyedropper') return;
-      
+    const token = ++loadTokenRef.current;
+    const switchingScene = currentSceneIdRef.current !== sceneId;
+    currentSceneIdRef.current = sceneId;
+    isLoadingRef.current = true;
+    if (notifyTimerRef.current) clearTimeout(notifyTimerRef.current);
+    if (historyTimerRef.current) clearTimeout(historyTimerRef.current);
+    canvas.discardActiveObject();
+    laserRef.current = null;
+    eraserCursorRef.current = null;
+    (async () => {
       try {
-        const el = (canvas as any).elements?.lower?.el || canvas.getElement();
-        if (!el) return;
-        const ctx = el.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return;
-        
-        const rect = el.getBoundingClientRect();
-        const x = (options.e.clientX - rect.left) * (el.width / rect.width);
-        const y = (options.e.clientY - rect.top) * (el.height / rect.height);
-        
-        const pixel = ctx.getImageData(x, y, 1, 1).data;
-        const hex = "#" + ((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1);
-        
-        if (onColorPicked) {
-          onColorPicked(hex);
-        }
+        await loadCanvasData(canvas, sceneData, getCanvas);
       } catch (err) {
-        console.error("Eyedropper error:", err);
+        console.error('슬라이드를 불러오지 못했습니다', err);
+        toast.error('슬라이드 일부를 불러오지 못했습니다.');
       }
-    };
-
-    if (tool === 'laser') {
-      canvas.isDrawingMode = false;
-      canvas.on('mouse:down', handleLaserDown);
-      canvas.on('mouse:move', handleLaserMove);
-      canvas.on('mouse:up', handleLaserUp);
-    } else if (tool === 'eraser') {
-      canvas.isDrawingMode = false;
-      canvas.selection = false;
-      canvas.defaultCursor = 'none';
-      canvas.on('mouse:down', handleEraserDown);
-      canvas.on('mouse:move', handleEraserMove);
-      canvas.on('mouse:up', handleEraserUp);
-    } else if (tool === 'bucket') {
-      canvas.isDrawingMode = false;
-      canvas.on('mouse:down', handleBucketFill);
-    } else if (tool === 'eyedropper') {
-      canvas.isDrawingMode = false;
-      canvas.selection = false;
-      canvas.defaultCursor = 'crosshair';
-      canvas.on('mouse:down', handleEyedropper);
-    } else if (tool === 'pan') {
-      canvas.isDrawingMode = false;
-      canvas.selection = false;
-      canvas.defaultCursor = 'grab';
-    } else if (tool === 'select') {
-      canvas.isDrawingMode = false;
-      canvas.selection = true;
-      canvas.defaultCursor = 'default';
-    } else if (tool === 'cut') {
-      canvas.isDrawingMode = false;
-      canvas.selection = true;
-      canvas.defaultCursor = 'crosshair';
-    } else {
-      canvas.off('mouse:down', handleLaserDown);
-      canvas.off('mouse:move', handleLaserMove);
-      canvas.off('mouse:up', handleLaserUp);
-      canvas.off('mouse:down', handleEraserDown);
-      canvas.off('mouse:move', handleEraserMove);
-      canvas.off('mouse:up', handleEraserUp);
-      canvas.off('mouse:down', handleBucketFill);
-      canvas.off('mouse:down', handleEyedropper);
-      canvas.selection = false;
-      canvas.defaultCursor = 'crosshair';
-    }
-
-    // Update all objects' selectability based on current tool
-    const isSelectionTool = tool === 'select' || tool === 'cut';
-    canvas.forEachObject(obj => {
-      obj.selectable = isSelectionTool;
-      obj.evented = isSelectionTool;
-    });
-
-    canvas.isDrawingMode = tool === 'pen' || tool === 'pencil' || tool === 'fountain' || tool === 'ballpoint' || tool === 'dashed' || tool === 'highlighter' || tool === 'cut';
-    
-    if (canvas.isDrawingMode) {
-      const currentBrush = canvas.freeDrawingBrush;
-      // Check if we need to create a new brush or if we can just update the current one
-      let needsNewBrush = !(currentBrush instanceof fabric.PencilBrush);
-      let brush = needsNewBrush ? new fabric.PencilBrush(canvas) : (currentBrush as fabric.PencilBrush);
-        
-        let targetWidth = brushSize;
-        let targetColor = color;
-        let targetShadow = null;
-        let targetLineCap: CanvasLineCap = 'round';
-        let targetLineJoin: CanvasLineJoin = 'round';
-
-        switch (tool) {
-          case 'pencil':
-            targetWidth = 2;
-            targetColor = color.startsWith('#') ? `${color}b3` : color;
-            targetShadow = null; // Remove expensive shadows
-            break;
-          case 'fountain':
-            targetWidth = brushSize * 2.5;
-            targetLineCap = 'square';
-            targetLineJoin = 'miter';
-            break;
-          case 'ballpoint':
-            targetWidth = brushSize;
-            break;
-          case 'dashed':
-            targetWidth = brushSize;
-            break;
-          case 'highlighter':
-            targetWidth = brushSize * 4;
-            targetColor = color.startsWith('#') ? `${color}4D` : color;
-            targetLineCap = 'square';
-            break;
-          case 'cut':
-            targetWidth = 2;
-            targetColor = '#3b82f6';
-            break;
-          default:
-            targetWidth = brushSize;
-            break;
-        }
-
-      if (needsNewBrush || brush.color !== targetColor || brush.width !== targetWidth || brush.strokeLineCap !== targetLineCap) {
-        brush.color = targetColor;
-        brush.width = targetWidth;
-        brush.shadow = targetShadow;
-        brush.strokeLineCap = targetLineCap;
-        brush.strokeLineJoin = targetLineJoin;
-        brush.decimate = 1.2; // Balanced for 120Hz iPad input
-        canvas.freeDrawingBrush = brush;
+      if (token !== loadTokenRef.current) return; // 더 최근의 불러오기가 시작됨
+      afterLoad();
+      if (switchingScene) {
+        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        propsRef.current.onZoomChange?.(1);
       }
-    }
+      attachHistory(sceneId);
+      isLoadingRef.current = false;
+      setHasSelection(false);
+      propsRef.current.onCanvasChange?.({ sceneId, canvas, data: '', fromLoad: true });
+      forceRender(n => n + 1);
+    })();
+    // sceneData는 sceneId/sceneRevision이 바뀔 때만 다시 읽는다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneId, sceneRevision]);
 
-    // Update skipTargetFind based on tool
-    canvas.skipTargetFind = canvas.isDrawingMode;
-
-    // Update active object color if color changes
-    const activeObject = canvas.getActiveObject();
-    if (activeObject && tool === 'select') {
-      if (activeObject.type === 'i-text' || activeObject.type === 'text') {
-        activeObject.set('fill', color);
-      } else {
-        activeObject.set('stroke', color);
-      }
-      canvas.requestRenderAll();
-    }
-
-      // Consolidated path:created listener
-    const handlePathCreated = (e: any) => {
-      if (!(e.path as any).id) {
-        (e.path as any).id = Math.random().toString(36).substr(2, 9);
-      }
-      
-      // Lasso / Cut tool logic
-      if (tool === 'cut') {
-        const path = e.path;
-        const canvas = fabricRef.current;
-        if (canvas) {
-          const objects = canvas.getObjects().filter(obj => {
-            if (obj === path) return false;
-            // Check if object center is within the lasso path
-            return path.containsPoint(obj.getCenterPoint());
-          });
-
-          if (objects.length > 0) {
-            canvas.discardActiveObject();
-            const sel = new fabric.ActiveSelection(objects, { canvas });
-            canvas.setActiveObject(sel);
-          }
-          canvas.remove(path);
-          canvas.requestRenderAll();
-        }
-        return;
-      }
-
-      // Apply tool-specific properties
-      if (tool === 'dashed') {
-        e.path.set({ strokeDashArray: [10, 5] });
-      } else if (tool === 'highlighter') {
-        e.path.set({ globalCompositeOperation: 'multiply', opacity: 0.8 });
-      }
-      
-      // Performance optimizations for the new path
-      e.path.set({ 
-        objectCaching: true,
-        selectable: true,
-        evented: true,
-        strokeUniform: true,
-      });
-      
-      // Use requestAnimationFrame for non-critical updates
-      requestAnimationFrame(() => {
-        if (!fabricRef.current) return;
-        fabricRef.current.requestRenderAll();
-        saveHistory();
-        notifyCanvasChange();
-      });
-    };
-
-    canvas.on('path:created', handlePathCreated);
-
-    return () => {
-      if (laserPointer) canvas.remove(laserPointer);
-      if (eraserCircle) canvas.remove(eraserCircle);
-      canvas.off('mouse:down', handleLaserDown);
-      canvas.off('mouse:move', handleLaserMove);
-      canvas.off('mouse:up', handleLaserUp);
-      canvas.off('mouse:down', handleEraserDown);
-      canvas.off('mouse:move', handleEraserMove);
-      canvas.off('mouse:up', handleEraserUp);
-      canvas.off('mouse:down', handleBucketFill);
-      canvas.off('mouse:down', handleEyedropper);
-      canvas.off('path:created', handlePathCreated);
-    };
-  }, [tool, color, brushSize, onColorPicked]);
-
+  // ---------- 도구 / 펜 설정 ----------
   useEffect(() => {
-    if (!fabricRef.current) return;
     const canvas = fabricRef.current;
-    if (canvasBackground === 'dark') {
-      canvas.backgroundColor = '#1a202c';
-    } else {
-      canvas.backgroundColor = 'transparent';
+    if (!canvas) return;
+    if (tool !== 'select') {
+      canvas.discardActiveObject();
+      setHasSelection(false);
     }
-    canvas.requestRenderAll();
-  }, [canvasBackground]);
+    applyToolState();
+    if (tool === 'select' && pendingSelectRef.current) {
+      const objs = pendingSelectRef.current.filter(o => canvas.getObjects().includes(o));
+      pendingSelectRef.current = null;
+      if (objs.length) {
+        canvas.discardActiveObject();
+        canvas.setActiveObject(objs.length === 1 ? objs[0] : new fabric.ActiveSelection(objs, { canvas }));
+        canvas.requestRenderAll();
+      }
+    }
+    if (canvas.isDrawingMode) {
+      const brush = canvas.freeDrawingBrush instanceof fabric.PencilBrush ? canvas.freeDrawingBrush : new fabric.PencilBrush(canvas);
+      const hex = color.startsWith('#') && color.length === 7;
+      let width = brushSize, c = color;
+      let cap: CanvasLineCap = 'round', join: CanvasLineJoin = 'round';
+      switch (tool) {
+        case 'pencil': width = Math.max(1.5, brushSize / 2); c = hex ? `${color}b3` : color; break;
+        case 'fountain': width = brushSize * 2.5; cap = 'square'; join = 'miter'; break;
+        case 'highlighter': width = brushSize * 4; c = hex ? `${color}55` : color; cap = 'square'; break;
+        case 'lasso': width = 2; c = '#3b82f6'; break;
+      }
+      brush.color = c;
+      brush.width = width;
+      brush.strokeLineCap = cap;
+      brush.strokeLineJoin = join;
+      brush.strokeDashArray = tool === 'lasso' ? [6, 6] : null;
+      brush.decimate = 1.2;
+      canvas.freeDrawingBrush = brush;
+    }
+  }, [tool, color, brushSize, applyToolState]);
+
+  // ---------- 선택된 객체에 색 적용 (색을 바꿀 때만) ----------
+  const prevColorRef = useRef(color);
+  useEffect(() => {
+    if (prevColorRef.current === color) return;
+    prevColorRef.current = color;
+    const canvas = fabricRef.current;
+    if (!canvas || toolRef.current !== 'select') return;
+    const objs = canvas.getActiveObjects();
+    let changed = false;
+    objs.forEach((o: any) => {
+      if (o.type === 'image' || o instanceof fabric.Group) return;
+      if (TEXT_TYPES.has(o.type)) o.set('fill', color);
+      else o.set('stroke', color);
+      changed = true;
+    });
+    if (changed) { canvas.requestRenderAll(); commitChange(); }
+  }, [color, commitChange]);
+
+  // ---------- 배경 ----------
+  useEffect(() => { applyBackground(); }, [canvasBackground, applyBackground]);
+
+  const vpt = fabricRef.current?.viewportTransform || [1, 0, 0, 1, 0, 0];
+  const bgSize = canvasBackground === 'grid' ? 40 * vpt[0] : 24 * vpt[0];
 
   return (
-    <div 
-      ref={containerRef} 
+    <div
+      ref={containerRef}
       className={cn(
-        "w-full h-full overflow-hidden relative transition-colors duration-300 touch-none",
-        canvasBackground === 'dark' ? "bg-[#1a202c]" : "bg-white"
+        'w-full h-full overflow-hidden relative transition-colors duration-300 touch-none',
+        canvasBackground === 'dark' ? 'bg-[#1a202c]' : 'bg-white',
       )}
       style={{
-        backgroundImage: 
-          canvasBackground === 'grid' 
+        backgroundImage:
+          canvasBackground === 'grid'
             ? 'linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)'
             : canvasBackground === 'dot'
-            ? 'radial-gradient(circle, #d1d5db 1.5px, transparent 1.5px)'
-            : 'none',
-        backgroundSize: 
-          canvasBackground === 'grid' ? '40px 40px' : 
-          canvasBackground === 'dot' ? '24px 24px' : 'auto'
+              ? 'radial-gradient(circle, #d1d5db 1.5px, transparent 1.5px)'
+              : 'none',
+        backgroundSize: canvasBackground === 'grid' || canvasBackground === 'dot' ? `${bgSize}px ${bgSize}px` : 'auto',
+        backgroundPosition: `${vpt[4]}px ${vpt[5]}px`,
       }}
     >
       <canvas ref={canvasRef} />
-      
-      {/* Live Cursors Overlay */}
-      {multiplayer && multiplayer.cursors && Object.values(multiplayer.cursors).map((cursor: any) => {
-        const vpt = fabricRef.current?.viewportTransform || [1, 0, 0, 1, 0, 0];
+
+      {/* 다른 참여자의 커서 */}
+      {cursors?.map(cursor => {
         const domX = cursor.x * vpt[0] + vpt[4];
         const domY = cursor.y * vpt[3] + vpt[5];
         return (
-          <div 
+          <div
             key={cursor.id}
-            className="absolute z-[100] pointer-events-none transition-all duration-75 ease-linear"
+            className="absolute left-0 top-0 z-[100] pointer-events-none transition-transform duration-75 ease-linear"
             style={{ transform: `translate(${domX}px, ${domY}px)` }}
           >
             <svg className="w-5 h-5 drop-shadow-md" style={{ color: cursor.color }} viewBox="0 0 24 24" fill="currentColor">
-              <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 01.35-.15h6.87a.5.5 0 00.35-.85L6.35 2.85a.5.5 0 00-.85.35z"/>
+              <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 01.35-.15h6.87a.5.5 0 00.35-.85L6.35 2.85a.5.5 0 00-.85.35z" />
             </svg>
-            <div 
-              className="absolute top-5 left-5 text-white text-[10px] px-1.5 py-0.5 rounded-sm whitespace-nowrap shadow-sm font-medium"
-              style={{ backgroundColor: cursor.color }}
-            >
+            <div className="absolute top-5 left-5 text-white text-[11px] px-1.5 py-0.5 rounded-sm whitespace-nowrap shadow-sm font-medium" style={{ backgroundColor: cursor.color }}>
               {cursor.name}
             </div>
           </div>
         );
       })}
-      
-      {/* Floating Action Bar for Selected Objects */}
-      {hasSelection && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-white p-2 rounded-2xl shadow-lg border border-gray-100">
-          <button
-            onClick={handleCopy}
-            className="flex items-center justify-center w-10 h-10 text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-xl transition-colors"
-            title="Copy (Ctrl+C)"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-          </button>
-          <button
-            onClick={handlePaste}
-            className="flex items-center justify-center w-10 h-10 text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-xl transition-colors"
-            title="Paste (Ctrl+V)"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
-          </button>
-          
-          {(canGroup || isGroupSelected) && (
-            <>
-              <div className="w-px h-6 bg-gray-200 mx-1"></div>
-              {canGroup && (
-                <button
-                  onClick={handleGroup}
-                  className="flex items-center justify-center w-10 h-10 text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-xl transition-colors"
-                  title="Group (Ctrl+G)"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M10 6.5h4"/><path d="M10 17.5h4"/><path d="M6.5 10v4"/><path d="M17.5 10v4"/></svg>
-                </button>
-              )}
-              {isGroupSelected && (
-                <button
-                  onClick={handleUngroup}
-                  className="flex items-center justify-center w-10 h-10 text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-xl transition-colors"
-                  title="Ungroup (Ctrl+Shift+G)"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M10 6.5h4" strokeDasharray="2 2"/><path d="M10 17.5h4" strokeDasharray="2 2"/><path d="M6.5 10v4" strokeDasharray="2 2"/><path d="M17.5 10v4" strokeDasharray="2 2"/></svg>
-                </button>
-              )}
-            </>
-          )}
 
-          <div className="w-px h-6 bg-gray-200 mx-1"></div>
-          <button
-            onClick={handleDeleteSelected}
-            className="flex items-center justify-center w-10 h-10 text-red-500 hover:bg-red-50 hover:text-red-600 rounded-xl transition-colors"
-            title="Delete (Del)"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-          </button>
+      {/* 선택한 객체용 작업 막대 */}
+      {hasSelection && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 bg-white p-2 rounded-2xl shadow-lg border border-gray-100">
+          <ActionButton onClick={handleCopy} title="복사 (Ctrl+C)">
+            <rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+          </ActionButton>
+          <ActionButton onClick={handlePaste} title="붙여넣기 (Ctrl+V)">
+            <rect width="8" height="4" x="8" y="2" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          </ActionButton>
+          {canGroup && (
+            <ActionButton onClick={handleGroup} title="그룹으로 묶기 (Ctrl+G)">
+              <rect width="7" height="7" x="3" y="3" rx="1" /><rect width="7" height="7" x="14" y="3" rx="1" /><rect width="7" height="7" x="14" y="14" rx="1" /><rect width="7" height="7" x="3" y="14" rx="1" /><path d="M10 6.5h4" /><path d="M10 17.5h4" /><path d="M6.5 10v4" /><path d="M17.5 10v4" />
+            </ActionButton>
+          )}
+          {isGroupSelected && (
+            <ActionButton onClick={handleUngroup} title="그룹 풀기 (Ctrl+Shift+G)">
+              <rect width="7" height="7" x="3" y="3" rx="1" /><rect width="7" height="7" x="14" y="3" rx="1" /><rect width="7" height="7" x="14" y="14" rx="1" /><rect width="7" height="7" x="3" y="14" rx="1" />
+            </ActionButton>
+          )}
+          <div className="w-px h-6 bg-gray-200 mx-1" />
+          <ActionButton onClick={handleDeleteSelected} title="삭제 (Delete)" danger>
+            <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
+          </ActionButton>
         </div>
       )}
     </div>
   );
 }));
+
+const ActionButton: React.FC<{ onClick: () => void; title: string; danger?: boolean; children: React.ReactNode }> = ({ onClick, title, danger, children }) => (
+  <button
+    onClick={onClick}
+    title={title}
+    aria-label={title}
+    className={cn(
+      'flex items-center justify-center w-10 h-10 rounded-xl transition-colors',
+      danger ? 'text-red-500 hover:bg-red-50 hover:text-red-600' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+    )}
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  </button>
+);

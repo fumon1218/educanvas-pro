@@ -2,18 +2,18 @@ import React, { useState } from 'react';
 import { Users, X, Copy, Check, Link, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import type { Multiplayer } from '@/src/hooks/useMultiplayer';
 
 interface CollaborationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  multiplayer: any; // ReturnType of useMultiplayer
+  multiplayer: Multiplayer;
 }
 
 export const CollaborationModal: React.FC<CollaborationModalProps> = ({ isOpen, onClose, multiplayer }) => {
   const [targetRoomId, setTargetRoomId] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // For testing/prototype, we use static username for now, or could add an input field.
   
   if (!isOpen) return null;
 
@@ -44,9 +44,10 @@ export const CollaborationModal: React.FC<CollaborationModalProps> = ({ isOpen, 
           <div className="flex items-center justify-between p-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <Users className="w-5 h-5 text-indigo-600" />
-              <h2 className="text-lg font-semibold text-gray-800">실시간 협업 (Multiplayer)</h2>
+              <h2 className="text-lg font-semibold text-gray-800">실시간 협업</h2>
             </div>
             <button 
+              aria-label="닫기"
               onClick={onClose}
               className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
             >
@@ -65,12 +66,23 @@ export const CollaborationModal: React.FC<CollaborationModalProps> = ({ isOpen, 
                 </div>
                 
                 <p className="text-sm text-gray-600 text-center">
-                  친구와 함께 같은 화면에서 동시에 그림을 그려보세요! 방을 만들거나 코드를 입력해 참가할 수 있습니다.
+                  같은 화면에 함께 판서할 수 있습니다. 선생님이 방을 만들고, 학생은 방 코드를 입력해 참가합니다.
                 </p>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-semibold text-gray-500">내 이름 (커서에 표시)</span>
+                  <input
+                    type="text"
+                    value={multiplayer.userName}
+                    maxLength={20}
+                    onChange={(e) => multiplayer.setUserName(e.target.value)}
+                    placeholder="예) 김선생"
+                    className="px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none text-sm"
+                  />
+                </label>
 
                 <div className="flex flex-col gap-3 pt-2">
                   <button 
-                    onClick={multiplayer.createRoom}
+                    onClick={() => multiplayer.createRoom()}
                     className="w-full py-3 bg-indigo-600 text-white rounded-xl font-medium shadow-sm hover:bg-indigo-700 hover:shadow-md transition-all flex items-center justify-center gap-2"
                   >
                     <Link className="w-4 h-4" />
@@ -79,7 +91,7 @@ export const CollaborationModal: React.FC<CollaborationModalProps> = ({ isOpen, 
                   
                   <div className="relative flex items-center justify-center py-2">
                     <div className="absolute border-t border-gray-200 w-full"></div>
-                    <span className="relative bg-white px-3 text-xs text-gray-400 uppercase tracking-widest font-medium">단축 코드 입력</span>
+                    <span className="relative bg-white px-3 text-xs text-gray-400 uppercase tracking-widest font-medium">또는 방 코드로 참가</span>
                   </div>
                   
                   <div className="flex gap-2">
@@ -88,6 +100,7 @@ export const CollaborationModal: React.FC<CollaborationModalProps> = ({ isOpen, 
                       placeholder="예) edu-a1b2c3"
                       value={targetRoomId}
                       onChange={(e) => setTargetRoomId(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleJoin(); }}
                       className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all text-sm"
                     />
                     <button 
@@ -138,7 +151,7 @@ export const CollaborationModal: React.FC<CollaborationModalProps> = ({ isOpen, 
                 )}
 
                 <button 
-                  onClick={multiplayer.leaveRoom}
+                  onClick={() => multiplayer.leaveRoom()}
                   className="w-full py-2.5 mt-2 text-red-600 bg-red-50 hover:bg-red-100 font-medium rounded-xl transition-colors text-sm"
                 >
                   연결 종료하기
@@ -164,7 +177,7 @@ export const CollaborationModal: React.FC<CollaborationModalProps> = ({ isOpen, 
                   )}
                 </div>
                 <button 
-                  onClick={multiplayer.leaveRoom}
+                  onClick={() => multiplayer.leaveRoom()}
                   className="mt-2 px-6 py-2 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition-colors text-sm"
                 >
                   뒤로 가기
