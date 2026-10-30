@@ -57,8 +57,8 @@ export const SlideNavigator: React.FC<SlideNavigatorProps> = ({
                   <Layout size={20} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">Slide Navigator</h2>
-                  <p className="text-sm text-gray-500">Manage and navigate through your lecture slides</p>
+                  <h2 className="text-xl font-bold text-gray-900">슬라이드 전체 보기</h2>
+                  <p className="text-sm text-gray-500">눌러서 이동하고, 휴지통으로 삭제합니다</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -67,7 +67,7 @@ export const SlideNavigator: React.FC<SlideNavigatorProps> = ({
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200"
                 >
                   <Plus size={18} />
-                  New Slide
+                  새 슬라이드
                 </button>
                 <button
                   onClick={onClose}
@@ -110,7 +110,7 @@ export const SlideNavigator: React.FC<SlideNavigatorProps> = ({
                       
                       {/* Overlay Info */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                         <span className="text-white text-xs font-bold">Slide {index + 1}</span>
+                         <span className="text-white text-xs font-bold">{index + 1}번</span>
                       </div>
 
                       {/* Delete Button */}
@@ -131,7 +131,7 @@ export const SlideNavigator: React.FC<SlideNavigatorProps> = ({
                         "text-xs font-bold uppercase tracking-wider",
                         activeSlideId === slide.id ? "text-indigo-600" : "text-gray-400"
                       )}>
-                        Page {index + 1}
+                        {index + 1}
                       </span>
                       <span className="text-[10px] font-medium text-gray-400 truncate max-w-[120px]">
                         {slide.name}
@@ -146,7 +146,7 @@ export const SlideNavigator: React.FC<SlideNavigatorProps> = ({
                   className="w-56 aspect-[16/9] border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:border-indigo-300 hover:text-indigo-400 hover:bg-indigo-50/30 transition-all shrink-0"
                 >
                   <Plus size={32} strokeWidth={1} />
-                  <span className="text-xs font-bold uppercase tracking-widest">Add Slide</span>
+                  <span className="text-xs font-bold uppercase tracking-widest">슬라이드 추가</span>
                 </button>
               </div>
             </div>

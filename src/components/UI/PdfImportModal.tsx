@@ -26,17 +26,17 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ isOpen, onClose,
                   <FileText size={24} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-800">Import PDF</h2>
+                  <h2 className="text-xl font-bold text-gray-800">PDF 넣기</h2>
                   <p className="text-xs text-gray-500 truncate max-w-[200px]">{fileName || 'Document.pdf'}</p>
                 </div>
               </div>
-              <button onClick={onClose} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+              <button onClick={onClose} aria-label="닫기" className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
                 <X size={20} />
               </button>
             </div>
 
             <div className="p-6 flex flex-col gap-4">
-              <p className="text-sm text-gray-600 mb-2">How would you like to import the pages of this PDF?</p>
+              <p className="text-sm text-gray-600 mb-2">PDF 페이지를 어떻게 넣을까요?</p>
               
               <button 
                 onClick={() => onImport('single')}
@@ -46,8 +46,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ isOpen, onClose,
                   <Layers size={24} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-gray-800 group-hover:text-indigo-700">All in Current Slide</h3>
-                  <p className="text-xs text-gray-500 mt-1">Load all pages as separate images onto the current canvas.</p>
+                  <h3 className="font-bold text-gray-800 group-hover:text-indigo-700">현재 슬라이드에 모두 넣기</h3>
+                  <p className="text-xs text-gray-500 mt-1">모든 페이지를 사진처럼 지금 슬라이드에 나란히 놓습니다.</p>
                 </div>
               </button>
 
@@ -59,8 +59,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ isOpen, onClose,
                   <CopyPlus size={24} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-gray-800 group-hover:text-indigo-700">One Slide per Page</h3>
-                  <p className="text-xs text-gray-500 mt-1">Automatically create a new slide for each page in the PDF.</p>
+                  <h3 className="font-bold text-gray-800 group-hover:text-indigo-700">한 페이지씩 슬라이드 만들기 (추천)</h3>
+                  <p className="text-xs text-gray-500 mt-1">페이지마다 슬라이드를 하나씩 만들어 넘기며 판서할 수 있습니다.</p>
                 </div>
               </button>
             </div>

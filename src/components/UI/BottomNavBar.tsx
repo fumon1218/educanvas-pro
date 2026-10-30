@@ -20,6 +20,8 @@ interface BottomNavBarProps {
   onToggleCamera?: () => void;
   isZenMode?: boolean;
   isVertical?: boolean;
+  onRecord?: () => void;
+  isRecording?: boolean;
 }
 
 export const BottomNavBar: React.FC<BottomNavBarProps> = ({ 
@@ -38,7 +40,9 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   isCameraOpen = false,
   onToggleCamera,
   isZenMode = false,
-  isVertical = true
+  isVertical = true,
+  onRecord,
+  isRecording = false,
 }) => {
   const zoomPercent = Math.round(zoomLevel * 100);
 
@@ -60,7 +64,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
                 ? "bg-purple-700 text-white ring-4 ring-purple-200" 
                 : "bg-purple-600 text-white hover:bg-purple-700"
             )}
-            title="Pan / Zoom Canvas (Double-click to reset)"
+            title="화면 이동 (두 번 누르면 100%로)"
           >
             <AnimatePresence mode="wait">
               {zoomPercent === 100 ? (
@@ -97,7 +101,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
                 ? "bg-indigo-600 text-white" 
                 : "bg-white text-gray-600 hover:bg-gray-50"
             )}
-            title={isNavigatorPinned ? "Unpin Mini-map" : "Pin Mini-map"}
+            title={isNavigatorPinned ? "미니맵 숨기기" : "미니맵 항상 보기"}
           >
             <LayoutTemplate size={20} strokeWidth={1.5} />
           </button>
@@ -112,10 +116,25 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
                 "p-3 rounded-full transition-colors",
                 isCameraOpen ? "text-blue-600 bg-blue-50" : "text-gray-500 hover:bg-gray-100"
               )} 
-              title={isCameraOpen ? "Close Camera" : "Open Camera"}
+              title={isCameraOpen ? "카메라 끄기" : "카메라 켜기"}
+              aria-label={isCameraOpen ? "카메라 끄기" : "카메라 켜기"}
             >
               <Video size={20} strokeWidth={1.5} />
             </button>
+            {onRecord && (
+              <button
+                onClick={onRecord}
+                disabled={isRecording}
+                className={cn(
+                  "p-3 rounded-full transition-colors",
+                  isRecording ? "text-red-500 bg-red-50" : "text-red-500 hover:bg-red-50"
+                )}
+                title={isRecording ? "녹화 중" : "수업 녹화"}
+                aria-label={isRecording ? "녹화 중" : "수업 녹화"}
+              >
+                <Circle size={20} strokeWidth={1.5} fill={isRecording ? 'currentColor' : 'none'} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -127,7 +146,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
             onClick={onPrevSlide}
             disabled={currentSlide <= 1}
             className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors" 
-            title="Previous Slide"
+            title="이전 슬라이드 (PageUp)" aria-label="이전 슬라이드"
           >
             <ChevronLeft size={20} strokeWidth={1.5} />
           </button>
@@ -147,7 +166,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
           <button 
             onClick={onAddSlide}
             className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 transition-colors" 
-            title="Add Slide"
+            title="슬라이드 추가" aria-label="슬라이드 추가"
           >
             <Plus size={20} strokeWidth={1.5} />
           </button>
@@ -158,7 +177,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
             onClick={onNextSlide}
             disabled={currentSlide >= totalSlides}
             className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors" 
-            title="Next Slide"
+            title="다음 슬라이드 (PageDown)" aria-label="다음 슬라이드"
           >
             <ChevronRight size={20} strokeWidth={1.5} />
           </button>

@@ -1,112 +1,91 @@
 rules_version = '2';
 
+// EduCanvas Pro - Firestore 보안 규칙
+// 배포: firebase deploy --only firestore:rules
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: boards
-    // Document ID: {boardId}
-    // Fields:
-    //   - name: string (required, max 100 chars)
-    //   - ownerId: string (required, immutable)
-    //   - createdAt: timestamp (required, immutable)
-    //   - updatedAt: timestamp (required)
-    //
-    // Collection: boards/{boardId}/scenes
-    // Document ID: {sceneId}
-    // Fields:
-    //   - name: string (required, max 100 chars)
-    //   - data: string (required, max 900000 chars)
-    //   - order: number (required)
-    //   - updatedAt: timestamp (required)
-    //   - updatedBy: string (required)
-    //
-    // ===============================================================
 
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
-    function isAuthenticated() {
-      return request.auth != null;
+    function isAuthenticated() { return request.auth != null; }
+
+    // 관리자 계정 (src/lib/access.ts의 ADMIN_EMAIL과 같아야 함)
+    function isAdmin() {
+      return isAuthenticated() &&
+             request.auth.token.email_verified == true &&
+             request.auth.token.email == 'fumon1218@gmail.com';
     }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+
+    // 관리자이거나, 관리자가 허용 목록(allowedUsers)에 등록한 계정
+    function isAllowed() {
+      return isAdmin() || (
+        isAuthenticated() &&
+        request.auth.token.email_verified == true &&
+        exists(/databases/$(database)/documents/allowedUsers/$(request.auth.token.email.lower()))
+      );
     }
-    
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
-    }
-    
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
-    }
-    
+
     function isValidString(field, minLen, maxLen) {
       return request.resource.data[field] is string &&
              request.resource.data[field].size() >= minLen &&
              request.resource.data[field].size() <= maxLen;
     }
-    
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-    
-    function isValidBoard(data) {
-      return hasOnlyAllowedFields(['name', 'ownerId', 'createdAt', 'updatedAt']) &&
-             isValidString('name', 1, 100) &&
-             data.ownerId is string &&
-             data.createdAt is timestamp &&
-             data.updatedAt is timestamp;
-    }
-    
-    function isValidScene(data) {
-      return hasOnlyAllowedFields(['name', 'data', 'order', 'updatedAt', 'updatedBy']) &&
-             isValidString('name', 1, 100) &&
-             isValidString('data', 0, 900000) && // Max ~900KB for Firestore limits
-             data.order is number &&
-             data.updatedAt is timestamp &&
-             data.updatedBy is string;
+
+    function boardOwner(boardId) {
+      return get(/databases/$(database)/documents/boards/$(boardId)).data.ownerId;
     }
 
-    // ===============================================================
-    // Rules
-    // ===============================================================
+    function isValidBoard() {
+      return request.resource.data.keys().hasOnly(['name', 'ownerId', 'createdAt', 'updatedAt']) &&
+             isValidString('name', 1, 100) &&
+             request.resource.data.ownerId is string &&
+             request.resource.data.createdAt is timestamp &&
+             request.resource.data.updatedAt is timestamp;
+    }
+
+    function isValidScene() {
+      return request.resource.data.keys().hasOnly(['name', 'data', 'order', 'updatedAt', 'updatedBy']) &&
+             isValidString('name', 1, 100) &&
+             isValidString('data', 0, 900000) &&
+             request.resource.data.order is number &&
+             request.resource.data.updatedAt is timestamp &&
+             request.resource.data.updatedBy == request.auth.uid;
+    }
+
+    // 사용 허락 목록: 문서 ID = 소문자 이메일
+    match /allowedUsers/{email} {
+      // 관리자는 전체 관리, 본인은 자기 문서만 확인 가능(입장 확인용)
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.token.email.lower() == email);
+      allow create, update: if isAdmin() &&
+                               request.resource.data.keys().hasOnly(['name', 'addedAt', 'addedBy']) &&
+                               request.resource.data.name is string && request.resource.data.name.size() <= 40 &&
+                               request.resource.data.addedAt is timestamp;
+      allow delete: if isAdmin();
+    }
 
     match /boards/{boardId} {
-      // Anyone authenticated can read boards (for collaboration via link)
-      allow read: if isAuthenticated();
-      
-      allow create: if isAuthenticated() && 
-                       isValidBoard(request.resource.data) &&
-                       request.resource.data.ownerId == request.auth.uid;
-                       
-      allow update: if isAuthenticated() && 
-                       isValidBoard(request.resource.data) &&
-                       resource.data.ownerId == request.resource.data.ownerId && // ownerId is immutable
-                       resource.data.createdAt == request.resource.data.createdAt; // createdAt is immutable
-                       
-      allow delete: if isOwner(resource.data.ownerId);
-      
+      // 허용된 계정 중 링크(보드 ID)를 아는 사람만 읽기. 목록 조회는 허용하지 않음.
+      allow get: if isAllowed();
+      allow list: if false;
+
+      allow create: if isAllowed() && isValidBoard() && request.resource.data.ownerId == request.auth.uid;
+      // 보드 정보 수정·삭제는 만든 사람만
+      allow update: if isAllowed() && isValidBoard() &&
+                       resource.data.ownerId == request.auth.uid &&
+                       request.resource.data.ownerId == resource.data.ownerId &&
+                       request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+
       match /scenes/{sceneId} {
-        // Anyone authenticated can read scenes of a board
-        allow read: if isAuthenticated();
-        
-        // Anyone authenticated can create/update scenes (collaborative)
-        allow create: if isAuthenticated() && 
-                         isValidScene(request.resource.data) &&
-                         request.resource.data.updatedBy == request.auth.uid;
-                         
-        allow update: if isAuthenticated() && 
-                         isValidScene(request.resource.data) &&
-                         request.resource.data.updatedBy == request.auth.uid;
-                         
-        allow delete: if isAuthenticated(); // Or restrict to board owner if needed
+        allow read: if isAllowed();
+        // 함께 판서: 보드가 있는 경우에만 허용된 계정이 쓰기 가능
+        allow create, update: if isAllowed() && exists(/databases/$(database)/documents/boards/$(boardId)) && isValidScene();
+        // 슬라이드 삭제는 보드를 만든 사람만
+        allow delete: if isAuthenticated() && boardOwner(boardId) == request.auth.uid;
       }
+    }
+
+    // 그 밖의 모든 문서는 접근 금지
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

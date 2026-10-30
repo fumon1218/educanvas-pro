@@ -16,7 +16,7 @@ export const FloatingCamera = ({ onClose }: { onClose: () => void }) => {
           videoRef.current.srcObject = stream;
         }
       } catch (err) {
-        setError('Camera access denied or not available.');
+        setError('카메라를 사용할 수 없습니다. 브라우저에서 카메라 권한을 허용해 주세요.');
         console.error(err);
       }
     };
@@ -40,6 +40,7 @@ export const FloatingCamera = ({ onClose }: { onClose: () => void }) => {
       className="absolute bottom-32 right-6 z-50 w-64 h-48 bg-black rounded-2xl shadow-2xl overflow-hidden border-2 border-white/20 cursor-move"
     >
       <button 
+        aria-label="카메라 닫기"
         onClick={onClose}
         className="absolute top-2 right-2 z-10 p-1.5 bg-black/50 hover:bg-black/80 text-white rounded-full backdrop-blur-sm transition-colors"
       >
