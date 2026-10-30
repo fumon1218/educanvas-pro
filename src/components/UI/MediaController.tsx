@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, Volume2, VolumeX, ExternalLink, X, RotateCcw } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, ExternalLink, X, RotateCcw, AppWindow, Box } from 'lucide-react';
+import { ScorePlayerBar } from './ScorePlayerBar';
 import { motion } from 'motion/react';
 import { sanitizeUrl } from '@/src/lib/canvasData';
 import type { MediaSelection } from '@/src/components/Canvas/Whiteboard';
@@ -7,9 +8,11 @@ import type { MediaSelection } from '@/src/components/Canvas/Whiteboard';
 interface MediaControllerProps {
   selection: MediaSelection;
   onClose: () => void;
+  onOpenWeb?: (url: string) => void;
+  onOpenModel?: (modelId: string, name?: string) => void;
 }
 
-export const MediaController: React.FC<MediaControllerProps> = ({ selection, onClose }) => {
+export const MediaController: React.FC<MediaControllerProps> = ({ selection, onClose, onOpenWeb, onOpenModel }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
   const [volume, setVolume] = useState(1);
@@ -44,7 +47,7 @@ export const MediaController: React.FC<MediaControllerProps> = ({ selection, onC
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="absolute bottom-48 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-6 py-3 bg-white/95 backdrop-blur-md border border-gray-200 rounded-2xl shadow-2xl"
+      className="absolute bottom-[176px] left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-5 py-2.5 bg-white/85 backdrop-blur-xl ring-1 ring-slate-900/[0.06] rounded-2xl shadow-[0_8px_30px_-6px_rgba(15,23,42,0.22)]"
     >
       <div className="flex items-center gap-3">
         {video && (
@@ -73,14 +76,34 @@ export const MediaController: React.FC<MediaControllerProps> = ({ selection, onC
           <div className="flex items-center gap-4">
             <span className="text-xs font-medium text-gray-500 truncate max-w-[220px]">{selection.url}</span>
             {safeUrl ? (
-              <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">
-                <ExternalLink size={14} />
-                새 창에서 열기
-              </a>
+              <>
+                {onOpenWeb && (
+                  <button onClick={() => onOpenWeb(safeUrl)} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">
+                    <AppWindow size={14} />
+                    수업 화면에서 열기
+                  </button>
+                )}
+                <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-200">
+                  <ExternalLink size={14} />
+                  새 탭
+                </a>
+              </>
             ) : (
               <span className="text-xs text-red-500">열 수 없는 주소입니다</span>
             )}
           </div>
+        )}
+        {selection.type === 'model' && (
+          <div className="flex items-center gap-3">
+            <Box size={18} className="text-indigo-500" />
+            <span className="text-xs font-medium text-gray-600 truncate max-w-[200px]">{selection.name?.replace(/\.glb$/i, '') || '3D 모델'}</span>
+            <button onClick={() => selection.modelId && onOpenModel?.(selection.modelId, selection.name)} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">
+              3D로 보기
+            </button>
+          </div>
+        )}
+        {selection.type === 'score' && selection.scoreData && (
+          <ScorePlayerBar scoreData={selection.scoreData} objectId={selection.objectId} />
         )}
       </div>
       <div className="w-px h-6 bg-gray-200" />

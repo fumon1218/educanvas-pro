@@ -19,6 +19,8 @@
 | tailwind-merge | 3.5.0 | MIT | 스타일 도우미 |
 | tailwindcss | 4.x | MIT | 스타일 |
 | fix-webm-duration | 1.0.6 | MIT | 녹화 영상 길이 정보 보정 |
+| three (three.js, Draco·Basis 디코더 포함) | 0.170.0 | MIT | 3D 모델 보기 |
+| MIDI.js Soundfonts (gleitz, CDN) | — | MIT (음원: FluidR3_GM, CC BY 3.0) | 악보 연주 악기 소리 |
 | Pretendard (글꼴, CDN) | 1.3.9 | SIL Open Font License 1.1 | 글꼴 |
 
 ## Apache License 2.0 고지
@@ -31,6 +33,10 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
 Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+## 악보 기능
+
+`src/music/` 폴더의 악보 해석·연주 코드는 제작자가 직접 만든 사보앱(sheet-music-app)에서 옮겨 온 것입니다.
 
 ## 앱 이미지
 

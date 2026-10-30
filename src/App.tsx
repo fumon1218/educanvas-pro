@@ -7,7 +7,6 @@ import { LayerPanel } from './components/UI/LayerPanel';
 import { TopNavBar } from './components/UI/TopNavBar';
 import { BottomNavBar } from './components/UI/BottomNavBar';
 import { SettingsModal } from './components/UI/SettingsModal';
-import { Navigator } from './components/UI/Navigator';
 import { SlideNavigator } from './components/UI/SlideNavigator';
 import { FloatingCamera } from './components/UI/FloatingCamera';
 import { PdfImportModal } from './components/UI/PdfImportModal';
@@ -17,13 +16,31 @@ import { PresentationBar } from './components/Present/PresentationBar';
 import { ShadeOverlay, SpotlightOverlay, TimerWidget, createOverlayState, drawOverlaysOnto } from './components/Present/FocusTools';
 import { RecordStartDialog, RecordingStatus, RecordingResultDialog } from './components/Record/RecorderUI';
 import { LessonRecorder, RecordingResult, isRecordingSupported } from './lib/lessonRecorder';
+import { FloatingWindow, type WindowRect } from './components/Windows/FloatingWindow';
+import { WebBrowserPane } from './components/Windows/WebBrowserPane';
+import { ModelViewerPane } from './components/Windows/ModelViewerPane';
+import { AssetLibrary, importModelFiles } from './components/Windows/AssetLibrary';
+import { Globe, Box } from 'lucide-react';
+
+interface AppWindow {
+  id: string;
+  kind: 'web' | 'model';
+  title: string;
+  url?: string;
+  modelId?: string;
+  rect: WindowRect;
+  minimized: boolean;
+  maximized: boolean;
+  z: number;
+}
 import { useMultiplayer, SyncData, CursorData } from './hooks/useMultiplayer';
 import { AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
+import { cn } from './lib/utils';
 import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { newId, normalizeSceneData, renderSceneImage, createImageScene } from './lib/canvasData';
+import { newId, normalizeSceneData, renderSceneImage, createImageScene, createScoreScene } from './lib/canvasData';
 import { saveProject, loadProject, isValidProject, downloadProjectFile, StoredProject } from './lib/projectStore';
 
 interface Scene {
@@ -44,7 +61,7 @@ export default function App() {
   // ---------- 도구 ----------
   const [activeTool, setActiveTool] = useState<ToolType>('pen');
   const [color, setColor] = useState('#000000');
-  const [brushSize, setBrushSize] = useState(4);
+  const [brushSize, setBrushSize] = useState(5);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isVertical, setIsVertical] = useState(true);
   const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>('blank');
@@ -63,7 +80,6 @@ export default function App() {
   const [mediaSelection, setMediaSelection] = useState<MediaSelection>({ type: 'none' });
   const [objects, setObjects] = useState<any[]>([]);
   const [mainCanvas, setMainCanvas] = useState<fabric.Canvas | null>(null);
-  const [isNavigatorPinned, setIsNavigatorPinned] = useState(false);
   const [isSlideNavigatorOpen, setIsSlideNavigatorOpen] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -84,6 +100,15 @@ export default function App() {
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [recStarting, setRecStarting] = useState(false);
   const [recResult, setRecResult] = useState<RecordingResult | null>(null);
+
+  // ---------- 떠 있는 창 (웹 브라우저 · 3D 모델) ----------
+  const [windows, setWindows] = useState<AppWindow[]>([]);
+  const zTopRef = useRef(90);
+  const winElsRef = useRef(new Map<string, HTMLDivElement>());
+  const modelCanvasRef = useRef(new Map<string, HTMLCanvasElement>());
+  const windowsRef = useRef(windows);
+  windowsRef.current = windows;
+  const [assetsOpen, setAssetsOpen] = useState(false);
   const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
   const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
@@ -94,6 +119,8 @@ export default function App() {
   const pendingRemoteRef = useRef(false);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(false);
+  const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'error'>('saved');
+  const saveErrorRef = useRef(false);
 
   // ---------- 협업 ----------
   const multiplayer = useMultiplayer();
@@ -264,7 +291,7 @@ export default function App() {
     setMainCanvas(canvas);
     setObjects(canvas.getObjects().filter(o => !o.excludeFromExport).map(o => ({
       id: (o as any).id,
-      type: (o as any).isBackground ? 'background' : (o as any).isVideo ? 'video' : (o as any).isAudio ? 'audio' : (o as any).isWebLink ? 'weblink' : o.type,
+      type: (o as any).isModel ? 'model' : (o as any).isScore ? 'score' : (o as any).isBackground ? 'background' : (o as any).isVideo ? 'video' : (o as any).isAudio ? 'audio' : (o as any).isWebLink ? 'weblink' : o.type,
       visible: o.visible,
       locked: !!(o as any).locked,
     })));
@@ -519,9 +546,11 @@ export default function App() {
     try {
       await saveProject(buildProject());
       dirtyRef.current = false;
+      saveErrorRef.current = false;
       if (manual) toast.success('저장했습니다.', { description: '이 브라우저에 저장되었습니다. 다른 컴퓨터에서 쓰려면 [파일로 내보내기]를 이용하세요.' });
     } catch (err) {
       console.error('저장 실패', err);
+      saveErrorRef.current = true;
       warnOnce(manual ? `save-${Date.now()}` : 'autosave-error', () =>
         toast.error('브라우저에 저장하지 못했습니다.', { description: '저장 공간이 부족할 수 있습니다. [파일로 내보내기]로 보관해 주세요.' }));
     }
@@ -585,6 +614,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 저장 상태 표시 (상단 구름 아이콘)
+  useEffect(() => {
+    const t = setInterval(() => setSaveState(saveErrorRef.current ? 'error' : dirtyRef.current ? 'dirty' : 'saved'), 1500);
+    return () => clearInterval(t);
+  }, []);
+
   // 자동 저장 (변경이 있을 때만, 알림 없이)
   const saveRef = useRef(saveToBrowser);
   saveRef.current = saveToBrowser;
@@ -645,6 +680,23 @@ export default function App() {
     }
   }, [captureCurrent, canvasBackground, projectName]);
 
+  /** 새 슬라이드들을 지금 슬라이드 뒤에 넣는다 (지금 슬라이드가 비어 있으면 그 자리에) */
+  const insertScenesAfterCurrent = useCallback((created: Scene[]) => {
+    if (!created.length) return;
+    const canvas = whiteboardRef.current?.getCanvas();
+    captureCurrent();
+    const list = [...scenesRef.current];
+    const idx = list.findIndex(s => s.id === activeIdRef.current);
+    const currentEmpty = (canvas?.getObjects().filter(o => !o.excludeFromExport).length ?? 1) === 0;
+    const removed: string[] = [];
+    if (currentEmpty) { removed.push(list[idx].id); list.splice(idx, 1, ...created); }
+    else list.splice(idx + 1, 0, ...created);
+    updateScenes(() => list.map((s, i) => ({ ...s, order: i })));
+    setActiveSceneId(created[0].id);
+    dirtyRef.current = true;
+    publishStructure(removed);
+  }, [captureCurrent, updateScenes, setActiveSceneId, publishStructure]);
+
   const processPdf = async (mode: 'single' | 'multiple') => {
     const file = pendingPdfFile;
     if (!file) return;
@@ -686,17 +738,7 @@ export default function App() {
       for (let i = 0; i < pages.length; i++) {
         created.push({ id: newId(), name: `${baseName} ${i + 1}쪽`.slice(0, 100), data: await createImageScene(pages[i], w, h), order: 0 });
       }
-      captureCurrent();
-      const list = [...scenesRef.current];
-      const idx = list.findIndex(s => s.id === activeIdRef.current);
-      const currentEmpty = (canvas?.getObjects().filter(o => !o.excludeFromExport).length ?? 1) === 0;
-      const removed: string[] = [];
-      if (currentEmpty) { removed.push(list[idx].id); list.splice(idx, 1, ...created); }
-      else list.splice(idx + 1, 0, ...created);
-      updateScenes(() => list.map((s, i) => ({ ...s, order: i })));
-      setActiveSceneId(created[0].id);
-      dirtyRef.current = true;
-      publishStructure(removed);
+      insertScenesAfterCurrent(created);
       toast.success(`슬라이드 ${created.length}장을 만들었습니다.`, { id: toastId });
     } catch (err) {
       console.error(err);
@@ -731,6 +773,161 @@ export default function App() {
       setIsGenerating(false);
     }
   };
+
+  // =====================================================================
+  // 떠 있는 창: 웹 브라우저 · 3D 모델
+  // =====================================================================
+  const nextRect = (w: number, h: number): WindowRect => {
+    const n = windowsRef.current.length;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const W = Math.min(w, vw - 40), H = Math.min(h, vh - 120);
+    return { x: Math.max(20, (vw - W) / 2 + n * 28 - 40), y: Math.max(70, (vh - H) / 2 + n * 28 - 30), w: W, h: H };
+  };
+  const openWebWindow = useCallback((url?: string) => {
+    const id = newId();
+    setWindows(ws => [...ws, { id, kind: 'web', title: '웹 브라우저', url, rect: nextRect(900, 560), minimized: false, maximized: false, z: ++zTopRef.current }]);
+  }, []);
+  const openModelWindow = useCallback((modelId: string, name?: string) => {
+    const existing = windowsRef.current.find(w => w.kind === 'model' && w.modelId === modelId);
+    if (existing) {
+      setWindows(ws => ws.map(w => (w.id === existing.id ? { ...w, minimized: false, z: ++zTopRef.current } : w)));
+      return;
+    }
+    const id = newId();
+    setWindows(ws => [...ws, { id, kind: 'model', title: name?.replace(/\.glb$/i, '') || '3D 모델', modelId, rect: nextRect(640, 520), minimized: false, maximized: false, z: ++zTopRef.current }]);
+  }, []);
+  const updateWindow = useCallback((id: string, patch: Partial<AppWindow>) => {
+    setWindows(ws => ws.map(w => (w.id === id ? { ...w, ...patch } : w)));
+  }, []);
+  const closeWindow = useCallback((id: string) => {
+    setWindows(ws => ws.filter(w => w.id !== id));
+    winElsRef.current.delete(id);
+    modelCanvasRef.current.delete(id);
+  }, []);
+  const focusWindow = useCallback((id: string) => {
+    setWindows(ws => {
+      const top = Math.max(...ws.map(w => w.z));
+      const me = ws.find(w => w.id === id);
+      if (!me || me.z === top) return ws;
+      return ws.map(w => (w.id === id ? { ...w, z: ++zTopRef.current } : w));
+    });
+  }, []);
+
+  /** 녹화 화면에 떠 있는 창도 그린다 (3D는 실제 화면, 웹은 보안상 안내 상자) */
+  const drawWindowsOnto = useCallback((ctx: CanvasRenderingContext2D, scale: number, offset: { x: number; y: number }) => {
+    [...windowsRef.current].sort((a, b) => a.z - b.z).forEach(w => {
+      const el = winElsRef.current.get(w.id);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const x = (r.left - offset.x) * scale, y = (r.top - offset.y) * scale, ww = r.width * scale, hh = r.height * scale;
+      const bar = 40 * scale;
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = 'rgba(15,23,42,0.18)';
+      ctx.lineWidth = 2 * scale;
+      ctx.beginPath();
+      ctx.roundRect(x, y, ww, hh, 16 * scale);
+      ctx.fill();
+      ctx.stroke();
+      ctx.clip();
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(x, y, ww, bar);
+      ctx.fillStyle = '#334155';
+      ctx.font = `600 ${13 * scale}px Pretendard, 'Noto Sans KR', sans-serif`;
+      ctx.fillText(w.title, x + 14 * scale, y + 25 * scale);
+      if (!w.minimized) {
+        const mc = modelCanvasRef.current.get(w.id);
+        if (w.kind === 'model' && mc) {
+          ctx.fillStyle = '#eef2f7';
+          ctx.fillRect(x, y + bar, ww, hh - bar);
+          ctx.drawImage(mc, x, y + bar, ww, hh - bar);
+        } else if (w.kind === 'web') {
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(x, y + bar, ww, hh - bar);
+          ctx.fillStyle = '#e2e8f0';
+          ctx.textAlign = 'center';
+          ctx.font = `600 ${18 * scale}px Pretendard, 'Noto Sans KR', sans-serif`;
+          ctx.fillText('웹 화면은 브라우저 보안상 녹화에 담기지 않습니다', x + ww / 2, y + bar + (hh - bar) / 2);
+        }
+      }
+      ctx.restore();
+    });
+  }, []);
+
+  /** GLB 파일들을 자산함에 넣고, 첫 모델을 슬라이드에 카드로 넣은 뒤 3D 창으로 연다 */
+  const handleModelFiles = useCallback(async (files: File[]) => {
+    const toastId = toast.loading('3D 모델을 넣는 중…');
+    const added = await importModelFiles(files, (d, t) => toast.loading(`3D 모델을 넣는 중… (${d}/${t})`, { id: toastId }));
+    toast.dismiss(toastId);
+    if (!added.length) return;
+    for (const a of added.slice(0, 1)) {
+      await whiteboardRef.current?.addModelCard(a);
+      openModelWindow(a.id, a.name);
+    }
+    if (added.length > 1) toast.success(`나머지 ${added.length - 1}개는 3D 자산함에 넣었습니다.`);
+  }, [openModelWindow]);
+
+  /** 악보 파일(NWC·MIDI·MusicXML)을 악보 그림으로 넣는다 */
+  const handleScoreFile = useCallback(async (file: File) => {
+    const toastId = toast.loading('악보를 읽는 중…');
+    try {
+      const [{ loadScoreFile }, { renderScorePages }] = await Promise.all([import('./music/loadScore'), import('./music/renderScore')]);
+      const { score, title } = await loadScoreFile(file);
+      const pages = renderScorePages(score, { title });
+      const data = JSON.stringify(score);
+      if (pages.length === 1) {
+        await whiteboardRef.current?.addScore(pages[0].svg, data, title);
+        toast.success('악보를 넣었습니다.', { id: toastId, description: '악보를 선택하면 아래에 연주 막대가 나타납니다.' });
+      } else {
+        // 긴 악보는 페이지마다 슬라이드 한 장 (PDF와 같은 방식)
+        const canvas = whiteboardRef.current?.getCanvas();
+        const w = canvas?.width || window.innerWidth;
+        const h = canvas?.height || window.innerHeight;
+        const created: Scene[] = [];
+        for (let i = 0; i < pages.length; i++) {
+          created.push({ id: newId(), name: `${title} ${i + 1}쪽`.slice(0, 100), data: await createScoreScene(pages[i].svg, data, title, w, h), order: 0 });
+        }
+        insertScenesAfterCurrent(created);
+        toast.success(`악보를 슬라이드 ${pages.length}장에 나눠 넣었습니다.`, { id: toastId, description: '악보를 선택하면 아래에 연주 막대가 나타납니다. 펜으로 바로 판서할 수 있습니다.' });
+      }
+      score.warnings?.slice(0, 2).forEach(w => toast.info(w));
+    } catch (err: any) {
+      console.error(err);
+      toast.error('악보를 읽지 못했습니다.', { id: toastId, description: err?.message || 'NWC, NWCTXT, MIDI, MusicXML 파일인지 확인해 주세요.' });
+    }
+  }, []);
+
+  const routeFile = useCallback(async (file: File) => {
+    const name = file.name.toLowerCase();
+    const { isScoreFileName } = await import('./music/loadScore');
+    if (file.type === 'application/pdf' || name.endsWith('.pdf')) {
+      setPendingPdfFile(file);
+      setIsPdfImportModalOpen(true);
+    } else if (name.endsWith('.glb')) {
+      handleModelFiles([file]);
+    } else if (isScoreFileName(name) && !file.type.startsWith('image/')) {
+      handleScoreFile(file);
+    } else {
+      whiteboardRef.current?.addFile(file);
+    }
+  }, [handleModelFiles, handleScoreFile]);
+
+  // 파일을 화면에 끌어다 놓아도 넣을 수 있게
+  useEffect(() => {
+    const over = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); };
+    const drop = (e: DragEvent) => {
+      if (!e.dataTransfer?.files?.length) return;
+      if ((e.target as HTMLElement)?.closest?.('[role="dialog"]')) return;
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer.files);
+      const glbs = files.filter(f => /\.glb$/i.test(f.name));
+      if (glbs.length > 1) handleModelFiles(glbs);
+      files.filter(f => !(glbs.length > 1 && /\.glb$/i.test(f.name))).forEach(f => routeFile(f));
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
+    return () => { window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); };
+  }, [routeFile, handleModelFiles]);
 
   // =====================================================================
   // 발표 모드
@@ -808,7 +1005,12 @@ export default function App() {
         pattern: canvasBgRef.current === 'grid' ? 'grid' : canvasBgRef.current === 'dot' ? 'dot' : 'none',
         vpt: (whiteboardRef.current?.getCanvas()?.viewportTransform as number[]) || [1, 0, 0, 1, 0, 0],
       }),
-      drawOverlays: (ctx, w, h, scale) => drawOverlaysOnto(ctx, overlayStateRef.current, w, h, scale),
+      drawOverlays: (ctx, w, h, scale) => {
+        const cr = whiteboardRef.current?.getContainer()?.getBoundingClientRect();
+        const off = { x: cr?.left ?? 0, y: cr?.top ?? 0 };
+        drawWindowsOnto(ctx, scale, off);
+        drawOverlaysOnto(ctx, overlayStateRef.current, w, h, scale, off);
+      },
     });
     try {
       await rec.start(opts, sceneLabel(activeIdRef.current));
@@ -824,7 +1026,7 @@ export default function App() {
     } finally {
       setRecStarting(false);
     }
-  }, [sceneLabel]);
+  }, [sceneLabel, drawWindowsOnto]);
 
   const stopRecording = useCallback(async () => {
     const rec = recorderRef.current;
@@ -879,8 +1081,8 @@ export default function App() {
   const activeScene = scenes.find(s => s.id === activeSceneId);
 
   return (
-    <div className="fixed inset-0 overflow-hidden font-sans bg-white text-gray-900">
-      <Toaster position="top-center" richColors closeButton />
+    <div className={cn('fixed inset-0 overflow-hidden font-sans text-slate-900', isPresenting ? 'bg-white' : 'bg-[#eef1f6]')}>
+      <Toaster position="top-center" offset={84} richColors closeButton />
 
       {!isPresenting && (
       <TopNavBar
@@ -910,6 +1112,7 @@ export default function App() {
         shadeOn={shadeOn}
         spotlightOn={spotlightOn}
         timerOn={timerOn}
+        saveState={saveState}
       />
       )}
       <input
@@ -922,7 +1125,12 @@ export default function App() {
 
       <CollaborationModal isOpen={isCollaborationModalOpen} onClose={() => setIsCollaborationModalOpen(false)} multiplayer={multiplayer} />
 
-      <div className="absolute inset-0 z-0">
+      <div
+        className={cn(
+          'absolute z-0 overflow-hidden transition-[inset,border-radius] duration-300',
+          isPresenting ? 'inset-0' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
+        )}
+      >
         <Whiteboard
           ref={whiteboardRef}
           tool={activeTool}
@@ -939,6 +1147,10 @@ export default function App() {
           onDrawingStateChange={handleDrawingStateChange}
           onRequestTool={setActiveTool}
           onPointerMove={handlePointerMove}
+          onOpenObject={sel => {
+            if (sel.type === 'model' && sel.modelId) openModelWindow(sel.modelId, sel.name);
+            else if (sel.type === 'weblink' && sel.url) openWebWindow(sel.url);
+          }}
           onResize={handleWhiteboardResize}
           autoFit={isPresenting}
           cursors={visibleCursors}
@@ -956,14 +1168,9 @@ export default function App() {
         brushSize={brushSize}
         onBrushSizeChange={setBrushSize}
         isVertical={isVertical}
-        onAddFile={file => {
-          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-            setPendingPdfFile(file);
-            setIsPdfImportModalOpen(true);
-          } else {
-            whiteboardRef.current?.addFile(file);
-          }
-        }}
+        onAddFile={file => { routeFile(file); }}
+        onOpenWebWindow={() => openWebWindow()}
+        onOpenAssets={() => setAssetsOpen(true)}
         onAddWebLink={url => whiteboardRef.current?.addWebLink(url)}
         onUndo={() => whiteboardRef.current?.undo()}
         onRedo={() => whiteboardRef.current?.redo()}
@@ -984,22 +1191,66 @@ export default function App() {
       />
       </>)}
 
-      <MediaController selection={mediaSelection} onClose={() => setMediaSelection({ type: 'none' })} />
+      <MediaController
+        selection={mediaSelection}
+        onClose={() => setMediaSelection({ type: 'none' })}
+        onOpenWeb={url => openWebWindow(url)}
+        onOpenModel={(id, name) => openModelWindow(id, name)}
+      />
+
+      {windows.map(w => (
+        <FloatingWindow
+          key={w.id}
+          id={w.id}
+          title={w.title}
+          icon={w.kind === 'web' ? <Globe size={15} /> : <Box size={15} />}
+          rect={w.rect}
+          minimized={w.minimized}
+          maximized={w.maximized}
+          zIndex={w.z}
+          onChange={rect => updateWindow(w.id, { rect })}
+          onFocus={() => focusWindow(w.id)}
+          onClose={() => closeWindow(w.id)}
+          onToggleMinimize={() => updateWindow(w.id, { minimized: !w.minimized })}
+          onToggleMaximize={() => updateWindow(w.id, { maximized: !w.maximized, minimized: false })}
+          registerEl={el => { if (el) winElsRef.current.set(w.id, el); else winElsRef.current.delete(w.id); }}
+        >
+          {w.kind === 'web' ? (
+            <WebBrowserPane
+              initialUrl={w.url}
+              onTitle={t => updateWindow(w.id, { title: t })}
+              onPinToCanvas={url => { whiteboardRef.current?.addWebLink(url); toast.success('캔버스에 링크 카드를 넣었습니다.'); }}
+            />
+          ) : (
+            <ModelViewerPane
+              modelId={w.modelId!}
+              onTitle={t => updateWindow(w.id, { title: t })}
+              onSnapshot={url => { whiteboardRef.current?.addImageDataUrl(url); toast.success('지금 모습을 캔버스에 넣었습니다.'); }}
+              registerCanvas={c => { if (c) modelCanvasRef.current.set(w.id, c); else modelCanvasRef.current.delete(w.id); }}
+            />
+          )}
+        </FloatingWindow>
+      ))}
+
+      <AssetLibrary
+        isOpen={assetsOpen}
+        onClose={() => setAssetsOpen(false)}
+        onInsert={async a => { setAssetsOpen(false); await whiteboardRef.current?.addModelCard(a); openModelWindow(a.id, a.name); }}
+      />
 
       {!isPresenting && (
       <BottomNavBar
-        onZoomToggle={() => setActiveTool(activeTool === 'pan' ? 'select' : 'pan')}
-        isZoomActive={activeTool === 'pan'}
         zoomLevel={zoomLevel}
         onResetZoom={() => whiteboardRef.current?.resetZoom()}
-        currentSlide={currentSceneIndex + 1}
-        totalSlides={scenes.length}
+        onZoomIn={() => whiteboardRef.current?.zoomIn()}
+        onZoomOut={() => whiteboardRef.current?.zoomOut()}
+        slides={scenes}
+        activeSlideId={activeSceneId}
+        onSelectSlide={goToScene}
         onNextSlide={handleNextSlide}
         onPrevSlide={handlePrevSlide}
         onAddSlide={addScene}
         onOpenSlideNavigator={() => { captureCurrent(); setIsSlideNavigatorOpen(true); }}
-        isNavigatorPinned={isNavigatorPinned}
-        onToggleNavigatorPin={() => setIsNavigatorPinned(p => !p)}
         isCameraOpen={isCameraOpen}
         onToggleCamera={() => setIsCameraOpen(o => !o)}
         isVertical={isVertical}
@@ -1053,15 +1304,6 @@ export default function App() {
       <AnimatePresence>
         {isCameraOpen && <FloatingCamera onClose={() => setIsCameraOpen(false)} />}
       </AnimatePresence>
-
-      {!isPresenting && (
-      <Navigator
-        mainCanvas={mainCanvas}
-        isPinned={isNavigatorPinned}
-        onTogglePin={() => setIsNavigatorPinned(p => !p)}
-        isZoomActive={activeTool === 'pan'}
-      />
-      )}
 
       <SlideNavigator
         isOpen={isSlideNavigatorOpen}
