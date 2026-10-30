@@ -57,6 +57,6 @@ jobs:
           name: 옥쌤보드 데스크톱 ${{ steps.v.outputs.version }}
           body: |
             옥쌤보드 데스크톱 설치 파일입니다. 수업 창의 웹 브라우저에서 네이버·다음 등 모든 사이트를 열 수 있습니다.
-            - 맥: OkssamBoard-…-mac-universal.dmg (처음 열 때 오른쪽 클릭 → 열기)
+            - 맥(애플 칩 M1~M4): OkssamBoard-…-mac-arm64.dmg / 인텔 맥: …-mac-x64.dmg (처음 열 때 오른쪽 클릭 → 열기)
             - 윈도우: OkssamBoard-…-win-x64.exe (PC 보호 창에서 추가 정보 → 실행)
           files: out/**/*
