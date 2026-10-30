@@ -115,7 +115,7 @@ export default function App() {
   const [windows, setWindows] = useState<AppWindow[]>([]);
   const zTopRef = useRef(90);
   const winElsRef = useRef(new Map<string, HTMLDivElement>());
-  const modelCanvasRef = useRef(new Map<string, HTMLCanvasElement[]>());
+  const modelCanvasRef = useRef(new Map<string, CanvasImageSource[]>());
   const windowsRef = useRef(windows);
   windowsRef.current = windows;
   const [assetsOpen, setAssetsOpen] = useState(false);
@@ -921,10 +921,10 @@ export default function App() {
       ctx.fillText(w.title, x + 14 * scale, y + 25 * scale);
       if (!w.minimized) {
         const mc = modelCanvasRef.current.get(w.id);
-        if (w.kind === 'model' && mc) {
+        if (mc && mc.length) {
           ctx.fillStyle = '#eef2f7';
           ctx.fillRect(x, y + bar, ww, hh - bar);
-          mc.forEach(c => { if (c.width && c.height) ctx.drawImage(c, x, y + bar, ww, hh - bar); });
+          mc.forEach(c => { const el = c as any; if ((el.width || el.videoWidth) && (el.height || el.videoHeight)) ctx.drawImage(c, x, y + bar, ww, hh - bar); });
         } else if (w.kind === 'web') {
           ctx.fillStyle = '#0f172a';
           ctx.fillRect(x, y + bar, ww, hh - bar);
@@ -1521,6 +1521,7 @@ export default function App() {
             <WebBrowserPane
               initialUrl={w.url}
               initialClip={w.clip}
+              registerVideo={v => { if (v) modelCanvasRef.current.set(w.id, [v]); else modelCanvasRef.current.delete(w.id); }}
               onTitle={t => updateWindow(w.id, { title: t })}
               onPinToCanvas={(url, clip) => { whiteboardRef.current?.addWebLink(url, clip); toast.success(clip ? '캔버스에 유튜브 구간 카드를 넣었습니다.' : '캔버스에 링크 카드를 넣었습니다.', { description: '카드를 두 번 누르면 수업 화면에서 바로 열립니다.' }); }}
             />

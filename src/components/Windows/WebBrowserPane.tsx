@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { TabCaptureView } from './TabCaptureView';
 import { YouTubePlayer, parseYouTube, type YouTubeHandle, type YouTubeTarget } from './YouTubePlayer';
 import { getYouTubeKey, setYouTubeKey, searchYouTube, type YouTubeResult } from '@/src/lib/youtubeSearch';
 import { ExternalLink, RotateCw, ArrowRight, Pin, Info, Scissors } from 'lucide-react';
@@ -153,11 +154,24 @@ const YouTubeHelper: React.FC<{ initial: string; onPaste: (url: string) => void 
   );
 };
 
+/** 다른 앱 안에서 열리지 않게 막아 둔 것으로 알려진 사이트 → 바로 '화면 가져오기'로 */
+const FRAME_BLOCKED = [
+  'naver.com', 'daum.net', 'kakao.com', 'google.com', 'google.co.kr', 'bing.com', 'facebook.com', 'instagram.com',
+  'x.com', 'twitter.com', 'github.com', 'notion.so', 'tistory.com', 'namu.wiki', 'coupang.com', 'chatgpt.com',
+  'openai.com', 'claude.ai', 'microsoft.com', 'office.com', 'apple.com', 'amazon.com', 'netflix.com', 'tiktok.com',
+];
+export const isFrameBlocked = (host: string) => {
+  const h = host.replace(/^www\.|^m\./, '');
+  return FRAME_BLOCKED.some(d => h === d || h.endsWith('.' + d)) && !/^docs\.google\.com$/.test(host);
+};
+
 interface Props {
   initialUrl?: string;
   initialClip?: Clip;
   onTitle?: (title: string) => void;
   onPinToCanvas?: (url: string, clip?: Clip) => void;
+  /** 화면 가져오기 영상 (녹화에 쓰기) */
+  registerVideo?: (v: HTMLVideoElement | null) => void;
 }
 
 const EXAMPLES = [
@@ -166,7 +180,7 @@ const EXAMPLES = [
   { label: '교육 사이트', hint: '예: phet.colorado.edu' },
 ];
 
-export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTitle, onPinToCanvas }) => {
+export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTitle, onPinToCanvas, registerVideo }) => {
   const [clip, setClip] = useState<Clip | undefined>(initialClip);
   const [clipOpen, setClipOpen] = useState(false);
   const [startText, setStartText] = useState(initialClip?.start != null ? fmtTime(initialClip.start) : '');
@@ -202,7 +216,8 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
     }
     setError(null);
     const original = sanitizeUrl(raw)!;
-    setCurrent({ url: r.url, original, kind: r.kind });
+    const host = new URL(original).hostname;
+    setCurrent({ url: r.url, original, kind: r.kind === 'web' && isFrameBlocked(host) ? 'capture' : r.kind });
     setInput(original);
     onTitle?.(r.kind === 'youtube' ? '유튜브' : new URL(original).hostname.replace(/^www\./, ''));
   };
@@ -288,6 +303,8 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
             initial={ytSearch}
             onPaste={url => go(url)}
           />
+        ) : current?.kind === 'capture' ? (
+          <TabCaptureView key={current.original} url={current.original} host={new URL(current.original).hostname.replace(/^www\./, '')} registerVideo={registerVideo} />
         ) : current?.kind === 'youtube' && ytTarget ? (
           <YouTubePlayer key={reloadKey} ref={ytRef} target={ytTarget} watchUrl={current.original} />
         ) : current ? (
@@ -321,7 +338,8 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
       {current && current.kind === 'web' && (
         <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] text-slate-400 border-t border-slate-100 bg-white">
           <Info size={12} className="shrink-0" />
-          화면이 비어 있으면 그 사이트가 다른 앱 안에서 열리는 것을 막아 둔 경우입니다. 오른쪽 위 ↗ 버튼으로 새 탭에서 여세요.
+          <span className="flex-1">화면이 비어 있으면 그 사이트가 다른 앱 안에서 열리는 것을 막아 둔 경우입니다.</span>
+          <button onClick={() => setCurrent(c => (c ? { ...c, kind: 'capture' } : c))} className="shrink-0 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold">화면 가져오기로 보기</button>
         </div>
       )}
     </div>
