@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { YouTubePlayer, parseYouTube, type YouTubeHandle, type YouTubeTarget } from './YouTubePlayer';
 import { ExternalLink, RotateCw, ArrowRight, Pin, Info, Scissors } from 'lucide-react';
 import { sanitizeUrl } from '@/src/lib/canvasData';
 
@@ -123,6 +124,13 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
   const [reloadKey, setReloadKey] = useState(0);
 
   const [ytSearch, setYtSearch] = useState<string | null>(null);
+  const ytRef = useRef<YouTubeHandle>(null);
+  const ytTarget = React.useMemo<YouTubeTarget | null>(() => {
+    if (!current || current.kind !== 'youtube') return null;
+    const t = parseYouTube(current.original);
+    if (!t) return null;
+    return { ...t, ...(clip?.start != null ? { start: clip.start } : {}), ...(clip?.end != null ? { end: clip.end } : {}) };
+  }, [current, clip]);
   const go = (raw: string, withClip: Clip | undefined = clip) => {
     // 주소가 아닌 낱말은 유튜브 검색어로 본다
     if (raw.trim() && !/[.:/]/.test(raw.trim())) { setCurrent(null); setError(null); setYtSearch(raw.trim()); return; }
@@ -211,8 +219,10 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
           <div className="absolute left-2 right-2 top-2 z-10 flex flex-wrap items-center gap-2 p-2 rounded-xl bg-white/95 backdrop-blur ring-1 ring-slate-200 shadow-lg text-[12px]">
             <span className="font-semibold text-slate-600">수업 구간</span>
             <input value={startText} onChange={e => setStartText(e.target.value)} placeholder="시작 (예: 2:10)" className="w-24 h-8 px-2 rounded-lg bg-slate-100 tabular-nums" aria-label="구간 시작" />
+            <button type="button" onClick={() => setStartText(fmtTime(ytRef.current?.getTime() ?? 0))} className="h-8 px-2 rounded-lg bg-slate-100 text-slate-600" title="재생 중인 지금 위치를 시작으로">지금</button>
             <span className="text-slate-400">~</span>
             <input value={endText} onChange={e => setEndText(e.target.value)} placeholder="끝 (예: 3:05)" className="w-24 h-8 px-2 rounded-lg bg-slate-100 tabular-nums" aria-label="구간 끝" />
+            <button type="button" onClick={() => setEndText(fmtTime(ytRef.current?.getTime() ?? 0))} className="h-8 px-2 rounded-lg bg-slate-100 text-slate-600" title="재생 중인 지금 위치를 끝으로">지금</button>
             <button type="button" onClick={applyClip} className="h-8 px-3 rounded-lg bg-slate-900 text-white font-semibold">이 구간 재생</button>
             {onPinToCanvas && (
               <button type="button" onClick={() => { const c = readClip(); if (c !== null) onPinToCanvas(current.original, c); }} className="h-8 px-3 rounded-lg bg-red-600 text-white font-semibold">구간 카드로 넣기</button>
@@ -225,6 +235,8 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
             initial={ytSearch}
             onPaste={url => go(url)}
           />
+        ) : current?.kind === 'youtube' && ytTarget ? (
+          <YouTubePlayer key={reloadKey} ref={ytRef} target={ytTarget} watchUrl={current.original} />
         ) : current ? (
           <iframe
             key={`${current.url}-${reloadKey}`}
@@ -234,6 +246,7 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
             allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write; web-share"
             allowFullScreen
             referrerPolicy="strict-origin-when-cross-origin"
+            // 다른 사이트가 수업 화면 전체를 다른 페이지로 바꾸지 못하게 (상단 이동 금지)
             sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms allow-presentation"
           />
         ) : (
