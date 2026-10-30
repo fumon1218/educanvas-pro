@@ -150,14 +150,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       aria-label={title || label}
       aria-pressed={active}
       className={cn(
-        'group flex items-center rounded-xl transition-all',
-        isVertical ? 'w-full gap-2.5 h-10 px-2.5' : 'w-11 h-11 justify-center',
+        'group shrink-0 flex items-center rounded-xl transition-all',
+        isVertical ? 'w-full gap-2.5 h-10 px-2.5 justify-center lg:justify-start' : 'w-11 h-11 justify-center',
         active ? 'bg-indigo-600 text-white shadow-[0_6px_14px_-4px_rgba(79,70,229,0.55)]' : 'text-slate-600 hover:bg-slate-900/[0.05]',
       )}
     >
       <Icon size={19} strokeWidth={active ? 2.1 : 1.8} className="shrink-0" />
-      {isVertical && <span className={cn('text-[13px] flex-1 text-left whitespace-nowrap', active ? 'font-semibold' : 'font-medium')}>{label}</span>}
-      {isVertical && caret && <MoreHorizontal size={14} className={cn('opacity-0 group-hover:opacity-60', active && 'opacity-70')} />}
+      {isVertical && <span className={cn('hidden lg:block text-[13px] flex-1 text-left whitespace-nowrap', active ? 'font-semibold' : 'font-medium')}>{label}</span>}
+      {isVertical && caret && <MoreHorizontal size={14} className={cn('hidden lg:block opacity-0 group-hover:opacity-60', active && 'opacity-70')} />}
     </button>
   );
 
@@ -178,7 +178,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         }}
       />
 
-      <div className={cn('pointer-events-auto rounded-2xl', glass, isVertical ? 'w-[132px] p-2 flex flex-col gap-0.5 max-h-full overflow-y-auto scrollbar-hide' : 'flex items-center gap-0.5 p-1.5')}>
+      <div className={cn('pointer-events-auto rounded-2xl', glass, isVertical ? 'w-[60px] lg:w-[132px] p-1.5 lg:p-2 flex flex-col gap-0.5 max-h-full overflow-y-auto scrollbar-hide' : 'flex items-center gap-0.5 p-1.5')}>
         <Row icon={MousePointer2} label="선택" active={activeTool === 'select'} onClick={() => { onToolSelect('select'); setMenu(null); }} />
         <Row icon={Hand} label="손" title="손 (화면 이동 · 스페이스바를 누른 채 끌어도 됩니다)" active={activeTool === 'pan'} onClick={() => { onToolSelect('pan'); setMenu(null); }} />
         <Row icon={Pencil} label="펜" caret active={penActive} onClick={() => { if (!penActive) onToolSelect('pen'); toggle('pen'); }} />
@@ -193,7 +193,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <div className={cn('bg-slate-200/80', isVertical ? 'h-px mx-1 my-2' : 'w-px h-7 mx-1')} />
 
         {/* 빠른 색 */}
-        <div className={cn(isVertical ? 'grid grid-cols-2 gap-2 px-3 py-1 justify-items-center' : 'flex items-center gap-1.5 px-1')}>
+        <div className={cn(isVertical ? 'grid grid-cols-1 lg:grid-cols-2 gap-2 lg:px-3 py-1 justify-items-center' : 'flex items-center gap-1.5 px-1')}>
           {QUICK_COLORS.map(q => (
             <button
               key={q.c}
@@ -205,9 +205,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             />
           ))}
           {isVertical && (
-            <button onClick={() => toggle('color')} title="다른 색 고르기" aria-label="다른 색 고르기" className="col-span-2 mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-800">
+            <button onClick={() => toggle('color')} title="다른 색 고르기" aria-label="다른 색 고르기" className="lg:col-span-2 mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-800">
               <span className="w-4 h-4 rounded-full ring-1 ring-slate-300" style={{ background: QUICK_COLORS.some(q => q.c === color.toLowerCase()) ? 'conic-gradient(red,yellow,lime,aqua,blue,magenta,red)' : color }} />
-              다른 색
+              <span className="hidden lg:inline">다른 색</span>
             </button>
           )}
           {!isVertical && (
@@ -216,7 +216,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
 
         {/* 굵기 */}
-        <div className={cn('flex items-center', isVertical ? 'justify-around px-2 py-1.5' : 'gap-1 px-1')}>
+        <div className={cn('flex items-center', isVertical ? 'flex-col lg:flex-row justify-around lg:px-2 py-1.5' : 'gap-1 px-1')}>
           {SIZES.map(s => (
             <button
               key={s.v}
@@ -232,7 +232,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
 
         <div className={cn('bg-slate-200/80', isVertical ? 'h-px mx-1 my-1.5' : 'w-px h-7 mx-1')} />
-        <div className={cn('flex', isVertical ? 'justify-around' : 'gap-0.5')}>
+        <div className={cn('flex', isVertical ? 'flex-col lg:flex-row items-center justify-around' : 'gap-0.5')}>
           <button onClick={onUndo} className="w-10 h-9 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소"><Undo2 size={18} /></button>
           <button onClick={onRedo} className="w-10 h-9 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행"><Redo2 size={18} /></button>
         </div>
@@ -248,7 +248,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             exit={{ opacity: 0, x: isVertical ? -6 : 0, y: isVertical ? 0 : 6 }}
             className={cn(
               'absolute z-50 p-2 rounded-2xl pointer-events-auto bg-white/95 backdrop-blur-xl ring-1 ring-slate-900/[0.07] shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] w-[230px]',
-              isVertical ? 'left-[144px] top-24' : 'bottom-full mb-3 left-1/2 -translate-x-1/2',
+              isVertical ? 'left-[72px] lg:left-[144px] top-24' : 'bottom-full mb-3 left-1/2 -translate-x-1/2',
             )}
           >
             <div className="px-2.5 pt-1 pb-1.5 text-[11px] font-semibold text-slate-400">{menus[menu].title}</div>
@@ -287,7 +287,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.97 }}
-            className={cn('absolute z-50 p-3 rounded-2xl pointer-events-auto bg-white ring-1 ring-slate-900/[0.07] shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] w-[236px]', isVertical ? 'left-[144px] bottom-24' : 'bottom-full mb-3 left-1/2 -translate-x-1/2')}
+            className={cn('absolute z-50 p-3 rounded-2xl pointer-events-auto bg-white ring-1 ring-slate-900/[0.07] shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] w-[236px]', isVertical ? 'left-[72px] lg:left-[144px] bottom-24' : 'bottom-full mb-3 left-1/2 -translate-x-1/2')}
           >
             <div className="grid grid-cols-8 gap-1.5 mb-3">
               {PRESET_COLORS.map(p => (

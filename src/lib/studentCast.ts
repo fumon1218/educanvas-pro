@@ -96,6 +96,7 @@ export function watchCast(code: string, handlers: {
 }) {
   let peer: Peer | null = null;
   let closed = false;
+  let ended = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
   const connect = () => {
     if (closed) return;
@@ -107,12 +108,13 @@ export function watchCast(code: string, handlers: {
       conn.on('open', () => handlers.onStatus('live'));
       conn.on('data', d => {
         const m = d as CastMessage;
-        if (m?.type === 'end') { handlers.onStatus('ended'); return; }
+        if (m?.type === 'end') { ended = true; handlers.onStatus('ended'); return; }
         handlers.onMessage(m);
       });
-      conn.on('close', () => { if (!closed) { handlers.onStatus('waiting'); retry = setTimeout(connect, 4000); } });
+      conn.on('close', () => { if (!closed && !ended) { handlers.onStatus('waiting'); retry = setTimeout(connect, 4000); } });
     });
     peer.on('error', err => {
+      if (ended) return;
       // 선생님이 아직 시작하지 않았거나 잠시 끊긴 경우: 다시 시도
       if ((err as any)?.type === 'peer-unavailable') handlers.onStatus('waiting');
       else handlers.onStatus('error');
