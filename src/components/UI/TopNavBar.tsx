@@ -140,7 +140,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   return (
     <>
       {/* 상단 막대 */}
-      <div className={cn('absolute top-3 left-4 right-4 z-50 h-14 flex items-center gap-3 px-3 rounded-2xl', glass)}>
+      <div className={cn('absolute top-3 left-4 right-4 z-50 h-14 flex items-center gap-2 sm:gap-3 px-3 rounded-2xl', glass)}>
         <div className="flex items-center gap-2 pr-2 select-none shrink-0" title="옥쌤보드">
           <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="w-8 h-8 rounded-[10px] shadow-sm" />
           <span className="hidden md:inline text-[17px] font-extrabold text-slate-900 tracking-tight">옥쌤보드</span>
@@ -149,7 +149,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
         <div className="relative" ref={menuRef}>
           <button onClick={() => setIsFileMenuOpen(o => !o)} className="flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-[14px] font-medium text-slate-700 hover:bg-slate-900/[0.05]" aria-haspopup="menu" aria-expanded={isFileMenuOpen}>
             <FileIcon size={16} className="text-slate-500" />
-            파일
+            <span className="whitespace-nowrap">파일</span>
             <ChevronDown size={15} className="text-slate-400" />
           </button>
           <AnimatePresence>
@@ -192,7 +192,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
               aria-label="수업 이름"
             />
           ) : (
-            <button onClick={() => setEditingName(true)} title="눌러서 수업 이름 바꾸기" className="px-2 py-1.5 text-[14px] font-semibold text-slate-800 rounded-lg hover:bg-slate-900/[0.05] truncate max-w-[260px]">
+            <button onClick={() => setEditingName(true)} title="눌러서 수업 이름 바꾸기" className="px-2 py-1.5 text-[14px] font-semibold text-slate-800 rounded-lg hover:bg-slate-900/[0.05] truncate max-w-[120px] sm:max-w-[260px]">
               {projectName}
             </button>
           )}
@@ -212,7 +212,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
 
         <button onClick={onPresent} className="flex items-center gap-2 h-10 px-4 rounded-xl bg-slate-900 text-white text-[14px] font-semibold hover:bg-black shadow-sm" title="발표 모드 (전체 화면)">
           <Play size={15} fill="currentColor" />
-          발표
+          <span className="hidden sm:inline whitespace-nowrap">발표</span>
         </button>
         <button
           onClick={onOpenStudentCast}
@@ -233,7 +233,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
         </button>
         <button onClick={onShare} className="flex items-center gap-2 h-10 px-4 rounded-xl bg-indigo-600 text-white text-[14px] font-semibold hover:bg-indigo-700 shadow-[0_6px_14px_-4px_rgba(79,70,229,0.55)]" title="Google 로그인으로 공유 링크 만들기">
           <Share size={15} />
-          {isSharing ? '링크 복사' : '공유'}
+          <span className="hidden sm:inline whitespace-nowrap">{isSharing ? '링크 복사' : '공유'}</span>
         </button>
         <div className={cn('relative hidden lg:flex items-center w-56 h-10 rounded-xl bg-slate-100/80 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-200 transition-all focus-within:w-72', !aiEnabled && 'opacity-70')}>
           <input
