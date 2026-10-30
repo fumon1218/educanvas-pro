@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown, Users, Share, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Sparkles, ArrowRight,
-  Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer,
+  Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer, Play, Cloud, CloudOff, Eraser,
 } from 'lucide-react';
+import { glass } from './BottomNavBar';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -33,6 +34,7 @@ interface TopNavBarProps {
   shadeOn?: boolean;
   spotlightOn?: boolean;
   timerOn?: boolean;
+  saveState?: 'saved' | 'dirty' | 'error';
 }
 
 const MenuItem: React.FC<{ icon: React.ElementType; label: string; hint?: string; onClick: () => void }> = ({ icon: Icon, label, hint, onClick }) => (
@@ -47,7 +49,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   projectName, onRenameProject, onSave, onLoad, onExportFile, onImportFile, onExportPDF, onExportCurrentPDF,
   onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
   isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
-  onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false,
+  onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false, saveState = 'saved',
 }) => {
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -89,43 +91,62 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
 
   const pill = 'bg-white/90 backdrop-blur-md border border-gray-200 rounded-full shadow-sm hover:shadow-md transition-all';
 
-  return (
-    <div className="absolute top-0 left-0 w-full z-50 flex flex-col pointer-events-none">
-      <div className="flex justify-between items-center h-16 px-4 gap-3">
-        {/* 왼쪽: 파일 메뉴 + 수업 이름 */}
-        <div className="pointer-events-auto flex items-center gap-2 min-w-0">
-          <div className="flex items-center gap-2 pr-1 select-none" title="옥쌤보드">
-            <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="w-8 h-8 rounded-lg shadow-sm" />
-            <span className="hidden md:inline text-sm font-bold text-indigo-700 tracking-tight">옥쌤보드</span>
-          </div>
-          <div className="relative" ref={menuRef}>
-            <button onClick={() => setIsFileMenuOpen(o => !o)} className={cn(pill, 'flex items-center gap-2 px-4 py-2 hover:bg-gray-50')} aria-haspopup="menu" aria-expanded={isFileMenuOpen}>
-              <FileIcon size={16} className="text-gray-500" />
-              <span className="font-medium text-sm text-gray-700">파일</span>
-              <ChevronDown size={16} className="text-gray-500" />
-            </button>
-            <AnimatePresence>
-              {isFileMenuOpen && (
-                <motion.div
-                  role="menu"
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="absolute z-50 top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden py-1"
-                >
-                  <MenuItem icon={Save} label="저장" hint="Ctrl+S" onClick={run(onSave)} />
-                  <MenuItem icon={FolderOpen} label="저장한 수업 불러오기" onClick={run(onLoad)} />
-                  <div className="h-px bg-gray-100 my-1" />
-                  <MenuItem icon={Download} label="파일로 내보내기 (.json)" onClick={run(onExportFile)} />
-                  <MenuItem icon={Upload} label="파일 열기" onClick={run(onImportFile)} />
-                  <div className="h-px bg-gray-100 my-1" />
-                  <MenuItem icon={FileText} label="PDF로 내보내기 (전체 슬라이드)" onClick={run(onExportPDF)} />
-                  <MenuItem icon={FileText} label="PDF로 내보내기 (현재 슬라이드)" onClick={run(onExportCurrentPDF)} />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+  const CardBtn: React.FC<{ icon: React.ElementType; label: string; active?: boolean; danger?: boolean; onClick: () => void; title?: string }> = ({ icon: Icon, label, active, danger, onClick, title }) => (
+    <button
+      onClick={onClick}
+      title={title || label}
+      aria-label={title || label}
+      aria-pressed={active}
+      className={cn(
+        'flex flex-col items-center justify-center gap-1 min-w-[64px] px-2 h-[56px] rounded-xl transition-colors',
+        active ? 'bg-indigo-50 text-indigo-700' : danger ? 'text-slate-600 hover:bg-red-50 hover:text-red-600' : 'text-slate-600 hover:bg-slate-900/[0.05]',
+      )}
+    >
+      <Icon size={19} strokeWidth={1.8} />
+      <span className="text-[11px] font-medium leading-none whitespace-nowrap">{label}</span>
+    </button>
+  );
 
+  return (
+    <>
+      {/* 상단 막대 */}
+      <div className={cn('absolute top-3 left-4 right-4 z-50 h-14 flex items-center gap-3 px-3 rounded-2xl', glass)}>
+        <div className="flex items-center gap-2 pr-2 select-none shrink-0" title="옥쌤보드">
+          <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="w-8 h-8 rounded-[10px] shadow-sm" />
+          <span className="hidden md:inline text-[17px] font-extrabold text-slate-900 tracking-tight">옥쌤보드</span>
+        </div>
+        <div className="w-px h-6 bg-slate-200" />
+        <div className="relative" ref={menuRef}>
+          <button onClick={() => setIsFileMenuOpen(o => !o)} className="flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-[14px] font-medium text-slate-700 hover:bg-slate-900/[0.05]" aria-haspopup="menu" aria-expanded={isFileMenuOpen}>
+            <FileIcon size={16} className="text-slate-500" />
+            파일
+            <ChevronDown size={15} className="text-slate-400" />
+          </button>
+          <AnimatePresence>
+            {isFileMenuOpen && (
+              <motion.div
+                role="menu"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                className="absolute z-50 top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] ring-1 ring-slate-900/[0.07] overflow-hidden py-1.5"
+              >
+                <MenuItem icon={Save} label="저장" hint="Ctrl+S" onClick={run(onSave)} />
+                <MenuItem icon={FolderOpen} label="저장한 수업 불러오기" onClick={run(onLoad)} />
+                <div className="h-px bg-slate-100 my-1" />
+                <MenuItem icon={Download} label="파일로 내보내기 (.json)" onClick={run(onExportFile)} />
+                <MenuItem icon={Upload} label="파일 열기" onClick={run(onImportFile)} />
+                <div className="h-px bg-slate-100 my-1" />
+                <MenuItem icon={FileText} label="PDF로 내보내기 (전체 슬라이드)" onClick={run(onExportPDF)} />
+                <MenuItem icon={FileText} label="PDF로 내보내기 (현재 슬라이드)" onClick={run(onExportCurrentPDF)} />
+                <div className="h-px bg-slate-100 my-1" />
+                <MenuItem icon={LayoutTemplate} label="도구 막대 위치 바꾸기" onClick={run(onToggleLayout)} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className="w-px h-6 bg-slate-200" />
+        <div className="flex items-center gap-1.5 min-w-0">
           {editingName ? (
             <input
               autoFocus
@@ -133,98 +154,64 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
               onChange={e => setNameDraft(e.target.value)}
               onBlur={commitName}
               onKeyDown={e => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameDraft(projectName); setEditingName(false); } }}
-              className="px-3 py-1.5 text-sm font-semibold text-gray-800 bg-white border border-indigo-300 rounded-lg outline-none ring-2 ring-indigo-100 w-48"
+              className="px-2.5 py-1.5 text-[14px] font-semibold text-slate-800 bg-white rounded-lg outline-none ring-2 ring-indigo-200 w-56"
               aria-label="수업 이름"
             />
           ) : (
-            <button onClick={() => setEditingName(true)} title="눌러서 수업 이름 바꾸기" className="px-3 py-1.5 text-sm font-semibold text-gray-800 rounded-lg hover:bg-white/80 truncate max-w-[220px]">
+            <button onClick={() => setEditingName(true)} title="눌러서 수업 이름 바꾸기" className="px-2 py-1.5 text-[14px] font-semibold text-slate-800 rounded-lg hover:bg-slate-900/[0.05] truncate max-w-[260px]">
               {projectName}
             </button>
           )}
+          <span
+            className={cn('shrink-0', saveState === 'error' ? 'text-red-400' : saveState === 'dirty' ? 'text-slate-300' : 'text-slate-400')}
+            title={saveState === 'saved' ? '이 브라우저에 저장됨' : saveState === 'dirty' ? '저장 대기 중 (곧 자동 저장)' : '저장하지 못했습니다'}
+          >
+            {saveState === 'error' ? <CloudOff size={17} /> : <Cloud size={17} />}
+          </span>
         </div>
 
-        {/* 오른쪽: 협업 / 공유 / AI */}
-        <div className="flex items-center gap-2 pointer-events-auto">
-          <button
-            onClick={onPresent}
-            className="flex items-center gap-2 px-4 py-1.5 bg-gray-900 text-white rounded-full shadow-sm hover:shadow-md hover:bg-black transition-all text-sm font-semibold"
-            title="발표 모드 (전체 화면)"
-          >
-            <Presentation size={14} />
-            발표
-          </button>
-          <button
-            onClick={onOpenMultiplayer}
-            className={cn(
-              'flex items-center gap-2 px-4 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all text-sm font-medium',
-              peerStatus === 'connected' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50',
-            )}
-            title="방 코드로 실시간 함께 그리기"
-          >
-            <Users size={14} />
-            {peerStatus === 'connected' ? `실시간 협업 중 · ${peerCount}명` : '실시간 협업'}
-          </button>
+        <div className="flex-1" />
 
-          <button
-            onClick={onShare}
-            className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-full shadow-sm hover:shadow-md hover:bg-indigo-700 transition-all text-sm font-medium"
-            title="Google 로그인으로 공유 링크 만들기"
-          >
-            <Share size={14} />
-            {isSharing ? '링크 복사' : '공유 링크'}
+        <button onClick={onPresent} className="flex items-center gap-2 h-10 px-4 rounded-xl bg-slate-900 text-white text-[14px] font-semibold hover:bg-black shadow-sm" title="발표 모드 (전체 화면)">
+          <Play size={15} fill="currentColor" />
+          발표
+        </button>
+        <button
+          onClick={onOpenMultiplayer}
+          className={cn('flex items-center gap-2 h-10 px-3.5 rounded-xl text-[14px] font-medium', peerStatus === 'connected' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'text-slate-700 hover:bg-slate-900/[0.05]')}
+          title="방 코드로 실시간 함께 그리기"
+        >
+          <Users size={16} />
+          {peerStatus === 'connected' ? `협업 중 · ${peerCount}명` : '협업'}
+        </button>
+        <button onClick={onShare} className="flex items-center gap-2 h-10 px-4 rounded-xl bg-indigo-600 text-white text-[14px] font-semibold hover:bg-indigo-700 shadow-[0_6px_14px_-4px_rgba(79,70,229,0.55)]" title="Google 로그인으로 공유 링크 만들기">
+          <Share size={15} />
+          {isSharing ? '링크 복사' : '공유'}
+        </button>
+        <div className={cn('relative hidden lg:flex items-center w-56 h-10 rounded-xl bg-slate-100/80 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-200 transition-all focus-within:w-72', !aiEnabled && 'opacity-70')}>
+          <input
+            type="text"
+            placeholder={aiEnabled ? 'AI에게 판서 정리 부탁하기…' : 'AI 기능 준비 중'}
+            className="flex-1 min-w-0 bg-transparent outline-none pl-3.5 text-[13px] text-slate-700 placeholder:text-slate-400"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit(); }}
+            aria-label="AI 판서 주제"
+          />
+          <button onClick={submit} disabled={isGenerating || !query.trim()} aria-label="AI로 만들기" className="w-9 h-9 mr-0.5 flex items-center justify-center rounded-lg text-indigo-500 hover:bg-indigo-50 disabled:hover:bg-transparent">
+            {isGenerating ? <Sparkles size={16} className="animate-spin" /> : <Sparkles size={16} />}
           </button>
-
-          <div className={cn(pill, 'relative flex items-center w-60 focus-within:w-80', !aiEnabled && 'opacity-70')}>
-            <div className="pl-3 pr-2 text-indigo-400"><Sparkles size={14} /></div>
-            <input
-              type="text"
-              placeholder={aiEnabled ? 'AI로 판서 정리 (예: 광합성)' : 'AI 기능 준비 중'}
-              className="flex-1 min-w-0 bg-transparent border-none outline-none py-1.5 text-xs text-gray-700 placeholder:text-gray-400"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit(); }}
-              aria-label="AI 판서 주제"
-            />
-            <div className="pr-1.5">
-              <button
-                onClick={submit}
-                disabled={isGenerating || !query.trim()}
-                aria-label="AI로 만들기"
-                className={cn(
-                  'flex items-center justify-center w-6 h-6 rounded-full transition-colors',
-                  isGenerating || !query.trim() ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100',
-                )}
-              >
-                {isGenerating ? <Sparkles size={12} className="animate-spin" /> : <ArrowRight size={12} />}
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 
-      <div className="flex justify-end items-center h-14 px-4 mt-1">
-        <div className="flex items-center gap-2 pointer-events-auto">
-          <button onClick={onToggleShade} className={cn(pill, 'p-2.5 hover:bg-gray-50', shadeOn ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-600')} title="가림막 (화면 아래 가리기)" aria-label="가림막" aria-pressed={shadeOn}>
-            <PanelBottomClose size={18} />
-          </button>
-          <button onClick={onToggleSpotlight} className={cn(pill, 'p-2.5 hover:bg-gray-50', spotlightOn ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-600')} title="스포트라이트" aria-label="스포트라이트" aria-pressed={spotlightOn}>
-            <Flashlight size={18} />
-          </button>
-          <button onClick={onToggleTimer} className={cn(pill, 'p-2.5 hover:bg-gray-50', timerOn ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-600')} title="타이머" aria-label="타이머" aria-pressed={timerOn}>
-            <Timer size={18} />
-          </button>
-          <div className="w-px h-6 bg-gray-300 mx-1" />
-          <button onClick={onClearAll} className={cn(pill, 'p-2.5 text-gray-600 hover:bg-red-50 hover:text-red-500 hover:border-red-200')} title="이 슬라이드 모두 지우기" aria-label="이 슬라이드 모두 지우기">
-            <Trash2 size={18} />
-          </button>
-          <button onClick={onToggleLayout} className={cn(pill, 'p-2.5 text-gray-600 hover:bg-gray-50')} title="도구 막대 위치 바꾸기 (세로/가로)" aria-label="도구 막대 위치 바꾸기">
-            <LayoutTemplate size={18} />
-          </button>
-          <button onClick={onOpenSettings} className={cn(pill, 'p-2.5 text-gray-600 hover:bg-gray-50')} title="설정" aria-label="설정">
-            <Settings size={18} />
-          </button>
-        </div>
+      {/* 오른쪽 위 수업 도구 카드 */}
+      <div className={cn('absolute top-[86px] right-6 z-40 flex items-center gap-0.5 p-1.5 rounded-2xl', glass)}>
+        <CardBtn icon={PanelBottomClose} label="가림막" active={shadeOn} onClick={onToggleShade} />
+        <CardBtn icon={Flashlight} label="스포트라이트" active={spotlightOn} onClick={onToggleSpotlight} />
+        <CardBtn icon={Timer} label="타이머" active={timerOn} onClick={onToggleTimer} />
+        <CardBtn icon={Eraser} label="지우기" title="이 슬라이드 지우기" danger onClick={onClearAll} />
+        <CardBtn icon={Settings} label="설정" onClick={onOpenSettings} />
       </div>
-    </div>
+    </>
   );
 };

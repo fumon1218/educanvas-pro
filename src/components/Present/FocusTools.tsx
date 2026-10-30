@@ -22,18 +22,19 @@ export const createOverlayState = (): OverlayState => ({
 });
 
 /** 녹화용: 같은 오버레이를 녹화 캔버스에 그린다 (좌표는 화면 CSS px 기준 → scale 배율 적용) */
-export function drawOverlaysOnto(ctx: CanvasRenderingContext2D, st: OverlayState, w: number, h: number, scale: number) {
+export function drawOverlaysOnto(ctx: CanvasRenderingContext2D, st: OverlayState, w: number, h: number, scale: number, offset: { x: number; y: number } = { x: 0, y: 0 }) {
   if (st.spotlightOn && st.spotX > -9000) {
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.72)';
     ctx.beginPath();
     ctx.rect(0, 0, w, h);
-    ctx.arc(st.spotX * scale, st.spotY * scale, st.spotR * scale, 0, Math.PI * 2, true);
+    ctx.arc((st.spotX - offset.x) * scale, (st.spotY - offset.y) * scale, st.spotR * scale, 0, Math.PI * 2, true);
     ctx.fill('evenodd');
     ctx.restore();
   }
   if (st.shadeOn) {
-    const top = st.shadeTop * h;
+    // 가림막은 브라우저 창 높이 기준 → 녹화하는 판 영역 기준으로 바꾼다
+    const top = Math.max(0, (st.shadeTop * window.innerHeight - offset.y) * scale);
     ctx.fillStyle = '#1f2937';
     ctx.fillRect(0, top, w, h - top);
   }

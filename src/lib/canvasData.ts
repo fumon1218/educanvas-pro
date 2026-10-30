@@ -1,7 +1,7 @@
 import * as fabric from 'fabric';
 
 /** 캔버스 직렬화 시 함께 저장할 사용자 정의 속성 */
-export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url'];
+export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url', 'isModel', 'modelId', 'modelName', 'isScore', 'scoreData', 'scoreTitle'];
 
 /** 세션 동안 살아 있는 동영상 요소 (blob URL → video element) */
 export const videoRegistry = new Map<string, HTMLVideoElement>();
@@ -162,6 +162,24 @@ export async function createImageScene(dataUrl: string, width: number, height: n
   (img as any).id = newId();
   (img as any).locked = true;
   (img as any).isBackground = true;
+  sc.add(img);
+  sc.centerObject(img);
+  const out = serializeCanvas(sc);
+  sc.dispose();
+  return out;
+}
+
+/** 악보 한 페이지를 화면 가운데에 놓은 장면 데이터 (선택하면 연주 막대가 나타난다) */
+export async function createScoreScene(svg: string, scoreData: string, title: string, width: number, height: number): Promise<string> {
+  const el = document.createElement('canvas');
+  const sc = new fabric.StaticCanvas(el, { width, height, enableRetinaScaling: false });
+  const img = await fabric.FabricImage.fromURL('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+  img.scale(Math.min((width - 80) / img.width, (height - 160) / img.height));
+  img.set({ cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false });
+  (img as any).id = newId();
+  (img as any).isScore = true;
+  (img as any).scoreData = scoreData;
+  (img as any).scoreTitle = title;
   sc.add(img);
   sc.centerObject(img);
   const out = serializeCanvas(sc);

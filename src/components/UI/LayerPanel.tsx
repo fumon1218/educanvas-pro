@@ -23,7 +23,7 @@ interface LayerPanelProps {
 
 const TYPE_LABELS: Record<string, string> = {
   path: '펜 선', 'i-text': '글자', text: '글자', textbox: '글자 상자', image: '사진', rect: '사각형', circle: '원',
-  ellipse: '타원', triangle: '삼각형', polygon: '다각형', line: '직선', group: '그룹', video: '동영상', audio: '소리', weblink: '웹 링크', background: 'PDF 배경',
+  ellipse: '타원', triangle: '삼각형', polygon: '다각형', line: '직선', group: '그룹', video: '동영상', audio: '소리', weblink: '웹 링크', background: 'PDF 배경', model: '3D 모델', score: '악보',
 };
 
 export const LayerPanel: React.FC<LayerPanelProps> = React.memo(({
@@ -37,17 +37,17 @@ export const LayerPanel: React.FC<LayerPanelProps> = React.memo(({
   );
 
   return (
-    <div className="absolute z-30 pointer-events-none right-6 bottom-28">
+    <div className="absolute z-30 pointer-events-none right-8 bottom-[116px]">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          'flex items-center gap-2 px-4 py-2 bg-white/90 backdrop-blur-md border border-gray-200 rounded-2xl shadow-lg hover:shadow-xl transition-all hover:bg-gray-50 pointer-events-auto',
+          'flex items-center gap-2 h-9 px-3 bg-white/85 backdrop-blur-xl ring-1 ring-slate-900/[0.06] rounded-xl shadow-[0_6px_20px_-8px_rgba(15,23,42,0.25)] text-slate-600 hover:text-slate-900 transition-all pointer-events-auto',
           isOpen && 'bg-indigo-50 text-indigo-600 border-indigo-200',
         )}
         aria-expanded={isOpen}
       >
-        <Layers size={20} />
-        <span className="font-semibold text-sm">레이어 ({objects.length})</span>
+        <Layers size={16} />
+        <span className="font-medium text-[13px]">레이어 {objects.length}</span>
       </button>
 
       <AnimatePresence>

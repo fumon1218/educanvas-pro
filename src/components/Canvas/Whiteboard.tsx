@@ -18,7 +18,15 @@ export type ToolType =
 
 export type CanvasBackground = 'blank' | 'grid' | 'dot' | 'dark';
 
-export type MediaSelection = { type: 'video' | 'audio' | 'weblink' | 'none'; element?: any; url?: string };
+export type MediaSelection = {
+  type: 'video' | 'audio' | 'weblink' | 'model' | 'score' | 'none';
+  element?: any;
+  url?: string;
+  modelId?: string;
+  name?: string;
+  scoreData?: string;
+  objectId?: string;
+};
 
 export interface CanvasChangeInfo {
   sceneId: string;
@@ -52,6 +60,8 @@ interface WhiteboardProps {
   onRequestTool?: (tool: ToolType) => void;
   onPointerMove?: (x: number, y: number) => void;
   onResize?: () => void;
+  /** 3D 카드·웹 카드를 두 번 눌렀을 때 */
+  onOpenObject?: (sel: MediaSelection) => void;
   /** 슬라이드를 열 때 내용이 화면에 꽉 차도록 맞춤 (발표 모드) */
   autoFit?: boolean;
   cursors?: RemoteCursor[];
@@ -71,6 +81,9 @@ export interface WhiteboardHandle {
   /** 녹화용: [판서 캔버스, 그리는 중인 선 캔버스, 레이저 캔버스] */
   getRecordLayers: () => (HTMLCanvasElement | null)[];
   getContainer: () => HTMLDivElement | null;
+  addModelCard: (asset: { id: string; name: string; thumb?: string }) => Promise<void>;
+  addScore: (svg: string, scoreData: string, title: string) => Promise<void>;
+  addImageDataUrl: (dataUrl: string) => Promise<void>;
   undo: () => void;
   redo: () => void;
   zoomIn: () => void;
@@ -136,6 +149,17 @@ function distToSegment(p: fabric.Point, a: fabric.Point, b: fabric.Point) {
   t = Math.max(0, Math.min(1, t));
   const x = a.x + t * dx, y = a.y + t * dy;
   return Math.hypot(p.x - x, p.y - y);
+}
+
+
+function selectionOf(target: any): MediaSelection {
+  if (!target) return { type: 'none' };
+  if (target.isVideo) return { type: 'video', element: target.getElement() };
+  if (target.isAudio) return { type: 'audio', url: target.audioUrl };
+  if (target.isWebLink) return { type: 'weblink', url: target.url };
+  if (target.isModel) return { type: 'model', modelId: target.modelId, name: target.modelName };
+  if (target.isScore) return { type: 'score', scoreData: target.scoreData, name: target.scoreTitle, objectId: target.id };
+  return { type: 'none' };
 }
 
 function isLocked(obj: fabric.FabricObject) {
@@ -598,7 +622,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     getThumbnail: () => {
       const c = fabricRef.current;
       if (!c) return undefined;
-      try { return c.toDataURL({ multiplier: 0.15, format: 'jpeg', quality: 0.7 }); } catch { return undefined; }
+      try { return c.toDataURL({ multiplier: 0.15, format: 'png' }); } catch { return undefined; }
     },
     addText: (text = '내용을 입력하세요', options: { width?: number } = {}) => {
       const t = options.width
@@ -734,6 +758,57 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       return [c?.lowerCanvasEl ?? null, c?.upperCanvasEl ?? null, laserCanvasRef.current];
     },
     getContainer: () => containerRef.current,
+    addModelCard: async (asset) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const W = 220, H = 230;
+      const parts: fabric.FabricObject[] = [
+        new fabric.Rect({ width: W, height: H, fill: '#ffffff', stroke: '#c7d2fe', strokeWidth: 2, rx: 18, ry: 18, originX: 'left', originY: 'top' }),
+      ];
+      if (asset.thumb) {
+        try {
+          const img = await fabric.FabricImage.fromURL(asset.thumb);
+          const sc = Math.min((W - 24) / img.width, 170 / img.height);
+          img.set({ scaleX: sc, scaleY: sc, originX: 'center', originY: 'center', left: W / 2, top: 98 });
+          parts.push(img);
+        } catch { /* 미리보기 없음 */ }
+      } else {
+        parts.push(new fabric.FabricText('🧊', { fontSize: 64, originX: 'center', originY: 'center', left: W / 2, top: 98 }));
+      }
+      const label = asset.name.replace(/\.glb$/i, '');
+      parts.push(new fabric.Rect({ width: W - 16, height: 34, fill: '#eef2ff', rx: 10, ry: 10, originX: 'left', originY: 'top', left: 8, top: H - 42 }));
+      parts.push(new fabric.FabricText(`3D  ${label.length > 16 ? label.slice(0, 15) + '…' : label}`, { fontSize: 14, fontWeight: 'bold', fill: '#4338ca', fontFamily: KOREAN_FONT, originX: 'center', originY: 'center', left: W / 2, top: H - 25 }));
+      const group = new fabric.Group(parts);
+      (group as any).isModel = true;
+      (group as any).modelId = asset.id;
+      (group as any).modelName = asset.name;
+      placeAtCenter(group);
+      addAndSelect(group);
+    },
+    addScore: async (svg, scoreData, title) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+      const img = await fabric.FabricImage.fromURL(url);
+      const scale = Math.min((canvas.width * 0.8) / img.width, (canvas.height * 0.8) / img.height, 1) / canvas.getZoom();
+      img.scale(scale);
+      img.set({ cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false });
+      (img as any).isScore = true;
+      (img as any).scoreData = scoreData;
+      (img as any).scoreTitle = title;
+      placeAtCenter(img);
+      addAndSelect(img);
+    },
+    addImageDataUrl: async (dataUrl) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const img = await fabric.FabricImage.fromURL(dataUrl);
+      const scale = Math.min((canvas.width * 0.5) / img.width, (canvas.height * 0.6) / img.height, 1) / canvas.getZoom();
+      img.scale(scale);
+      img.set({ cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false });
+      placeAtCenter(img);
+      addAndSelect(img);
+    },
     copy: handleCopy,
     paste: handlePaste,
     cut: handleCut,
@@ -792,14 +867,15 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       const target: any = canvas.getActiveObjects()[0];
       const cb = propsRef.current.onSelectionChange;
       if (!cb) return;
-      if (target?.isVideo) cb({ type: 'video', element: target.getElement() });
-      else if (target?.isAudio) cb({ type: 'audio', url: target.audioUrl });
-      else if (target?.isWebLink) cb({ type: 'weblink', url: target.url });
-      else cb({ type: 'none' });
+      cb(selectionOf(target));
     };
     canvas.on('selection:created', emitSelection);
     canvas.on('selection:updated', emitSelection);
     canvas.on('selection:cleared', emitSelection);
+    canvas.on('mouse:dblclick', opt => {
+      const sel = selectionOf(opt.target);
+      if (sel.type === 'model' || sel.type === 'weblink' || sel.type === 'score') propsRef.current.onOpenObject?.(sel);
+    });
 
     // --- 확대/축소 (휠) ---
     canvas.on('mouse:wheel', opt => {
