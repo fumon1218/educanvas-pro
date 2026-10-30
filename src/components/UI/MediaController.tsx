@@ -4,12 +4,13 @@ import { ScorePlayerBar } from './ScorePlayerBar';
 import { motion } from 'motion/react';
 import { sanitizeUrl } from '@/src/lib/canvasData';
 import type { MediaSelection } from '@/src/components/Canvas/Whiteboard';
+import { clipLabel, type Clip } from '@/src/components/Windows/WebBrowserPane';
 
 interface MediaControllerProps {
   selection: MediaSelection;
   onClose: () => void;
-  onOpenWeb?: (url: string) => void;
-  onOpenModel?: (modelId: string, name?: string) => void;
+  onOpenWeb?: (url: string, clip?: Clip) => void;
+  onOpenModel?: (modelId: string, name?: string, driveId?: string) => void;
 }
 
 export const MediaController: React.FC<MediaControllerProps> = ({ selection, onClose, onOpenWeb, onOpenModel }) => {
@@ -34,6 +35,7 @@ export const MediaController: React.FC<MediaControllerProps> = ({ selection, onC
 
   if (selection.type === 'none') return null;
   const safeUrl = selection.type === 'weblink' ? sanitizeUrl(selection.url || '') : null;
+  const clip: Clip | undefined = selection.type === 'weblink' && (selection.clipStart != null || selection.clipEnd != null) ? { start: selection.clipStart, end: selection.clipEnd } : undefined;
 
   const togglePlay = () => {
     if (!video) return;
@@ -47,7 +49,7 @@ export const MediaController: React.FC<MediaControllerProps> = ({ selection, onC
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="absolute bottom-[176px] left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-5 py-2.5 bg-white/85 backdrop-blur-xl ring-1 ring-slate-900/[0.06] rounded-2xl shadow-[0_8px_30px_-6px_rgba(15,23,42,0.22)]"
+      className="absolute bottom-[108px] left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-5 py-2.5 bg-white/85 backdrop-blur-xl ring-1 ring-slate-900/[0.06] rounded-2xl shadow-[0_8px_30px_-6px_rgba(15,23,42,0.22)]"
     >
       <div className="flex items-center gap-3">
         {video && (
@@ -74,11 +76,12 @@ export const MediaController: React.FC<MediaControllerProps> = ({ selection, onC
         )}
         {selection.type === 'weblink' && (
           <div className="flex items-center gap-4">
+            {clip && <span className="text-xs font-bold text-red-600 whitespace-nowrap">▶ {clipLabel(clip)}</span>}
             <span className="text-xs font-medium text-gray-500 truncate max-w-[220px]">{selection.url}</span>
             {safeUrl ? (
               <>
                 {onOpenWeb && (
-                  <button onClick={() => onOpenWeb(safeUrl)} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">
+                  <button onClick={() => onOpenWeb(safeUrl, clip)} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">
                     <AppWindow size={14} />
                     수업 화면에서 열기
                   </button>
@@ -97,7 +100,7 @@ export const MediaController: React.FC<MediaControllerProps> = ({ selection, onC
           <div className="flex items-center gap-3">
             <Box size={18} className="text-indigo-500" />
             <span className="text-xs font-medium text-gray-600 truncate max-w-[200px]">{selection.name?.replace(/\.glb$/i, '') || '3D 모델'}</span>
-            <button onClick={() => selection.modelId && onOpenModel?.(selection.modelId, selection.name)} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">
+            <button onClick={() => selection.modelId && onOpenModel?.(selection.modelId, selection.name, selection.driveId)} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">
               3D로 보기
             </button>
           </div>

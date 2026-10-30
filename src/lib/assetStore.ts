@@ -8,6 +8,17 @@ export interface ModelAsset {
   size: number;
   addedAt: number;
   thumb?: string; // PNG data URL
+  /** 구글 드라이브에서 가져온 파일이면 그 파일 번호 (다른 컴퓨터에서 다시 받을 때 쓴다) */
+  driveId?: string;
+  /** 3D 모델에 붙인 이름표 */
+  labels?: ModelLabel[];
+}
+
+export interface ModelLabel {
+  id: string;
+  text: string;
+  /** 모델 좌표계의 위치 */
+  p: [number, number, number];
 }
 
 interface ModelRecord extends ModelAsset {
@@ -45,11 +56,15 @@ async function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReq
 const newAssetId = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
 
 /** 같은 이름·크기의 파일이 이미 있으면 그것을 돌려준다 */
-export async function addModel(file: File): Promise<{ asset: ModelAsset; existed: boolean }> {
+export async function addModel(file: Blob & { name?: string }, opts: { id?: string; driveId?: string; name?: string } = {}): Promise<{ asset: ModelAsset; existed: boolean }> {
+  const name = opts.name || file.name || '3D 모델.glb';
   const all = await listModels();
-  const same = all.find(a => a.name === file.name && a.size === file.size);
-  if (same) return { asset: same, existed: true };
-  const rec: ModelRecord = { id: newAssetId(), name: file.name, size: file.size, addedAt: Date.now(), blob: file };
+  const same = all.find(a => (opts.id && a.id === opts.id) || (opts.driveId && a.driveId === opts.driveId) || (a.name === name && a.size === file.size));
+  if (same) {
+    if (opts.driveId && !same.driveId) await updateModel(same.id, { driveId: opts.driveId });
+    return { asset: { ...same, driveId: same.driveId || opts.driveId }, existed: true };
+  }
+  const rec: ModelRecord = { id: opts.id || newAssetId(), name, size: file.size, addedAt: Date.now(), blob: file, ...(opts.driveId ? { driveId: opts.driveId } : {}) };
   await tx('readwrite', s => s.put(rec));
   try { await navigator.storage?.persist?.(); } catch { /* 지원하지 않는 브라우저 */ }
   const { blob, ...asset } = rec;
@@ -82,6 +97,18 @@ export async function setModelThumb(id: string, thumb: string) {
     const s = t.objectStore(STORE);
     const g = s.get(id);
     g.onsuccess = () => { if (g.result) s.put({ ...g.result, thumb }); };
+    t.oncomplete = () => { db.close(); resolve(); };
+    t.onerror = () => { db.close(); reject(t.error); };
+  });
+}
+
+export async function updateModel(id: string, patch: Partial<Omit<ModelAsset, 'id'>>) {
+  const db = await openDB();
+  await new Promise<void>((resolve, reject) => {
+    const t = db.transaction(STORE, 'readwrite');
+    const s = t.objectStore(STORE);
+    const g = s.get(id);
+    g.onsuccess = () => { if (g.result) s.put({ ...g.result, ...patch }); };
     t.oncomplete = () => { db.close(); resolve(); };
     t.onerror = () => { db.close(); reject(t.error); };
   });

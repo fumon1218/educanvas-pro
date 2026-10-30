@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown, Users, Share, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Sparkles, ArrowRight,
-  Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer, Play, Cloud, CloudOff, Eraser,
+  Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer, Play, Cloud, CloudOff, Eraser, Paintbrush, MonitorSmartphone,
 } from 'lucide-react';
 import { glass } from './BottomNavBar';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import { BackgroundPicker, type BackgroundScope } from './BackgroundPicker';
+import type { CanvasBackground } from '@/src/lib/backgrounds';
 
 interface TopNavBarProps {
   projectName: string;
@@ -35,6 +37,11 @@ interface TopNavBarProps {
   spotlightOn?: boolean;
   timerOn?: boolean;
   saveState?: 'saved' | 'dirty' | 'error';
+  background: CanvasBackground;
+  onBackgroundChange: (bg: CanvasBackground, scope: BackgroundScope) => void;
+  onOpenStudentCast: () => void;
+  castCount?: number;
+  castOn?: boolean;
 }
 
 const MenuItem: React.FC<{ icon: React.ElementType; label: string; hint?: string; onClick: () => void }> = ({ icon: Icon, label, hint, onClick }) => (
@@ -50,7 +57,16 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
   isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
   onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false, saveState = 'saved',
+  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false,
 }) => {
+  const [bgOpen, setBgOpen] = useState(false);
+  const bgRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!bgOpen) return;
+    const onDown = (e: MouseEvent) => { if (bgRef.current && !bgRef.current.contains(e.target as Node)) setBgOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [bgOpen]);
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [editingName, setEditingName] = useState(false);
@@ -177,6 +193,15 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
           발표
         </button>
         <button
+          onClick={onOpenStudentCast}
+          className={cn('flex items-center gap-2 h-10 px-3.5 rounded-xl text-[14px] font-medium', castOn ? 'bg-sky-50 text-sky-700 ring-1 ring-sky-200' : 'text-slate-700 hover:bg-slate-900/[0.05]')}
+          title="학생 태블릿에 지금 화면을 보여 주기 (읽기 전용)"
+          aria-label={castOn ? `학생 화면 보내는 중, ${castCount}명` : '학생 화면'}
+        >
+          <MonitorSmartphone size={16} />
+          <span className="hidden xl:inline">{castOn ? `학생 ${castCount}명` : '학생 화면'}</span>
+        </button>
+        <button
           onClick={onOpenMultiplayer}
           className={cn('flex items-center gap-2 h-10 px-3.5 rounded-xl text-[14px] font-medium', peerStatus === 'connected' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'text-slate-700 hover:bg-slate-900/[0.05]')}
           title="방 코드로 실시간 함께 그리기"
@@ -205,12 +230,25 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
       </div>
 
       {/* 오른쪽 위 수업 도구 카드 */}
-      <div className={cn('absolute top-[86px] right-6 z-40 flex items-center gap-0.5 p-1.5 rounded-2xl', glass)}>
+      <div ref={bgRef} className={cn('absolute top-[86px] right-6 z-40 flex items-center gap-0.5 p-1.5 rounded-2xl', glass)}>
         <CardBtn icon={PanelBottomClose} label="가림막" active={shadeOn} onClick={onToggleShade} />
         <CardBtn icon={Flashlight} label="스포트라이트" active={spotlightOn} onClick={onToggleSpotlight} />
         <CardBtn icon={Timer} label="타이머" active={timerOn} onClick={onToggleTimer} />
+        <CardBtn icon={Paintbrush} label="배경" title="수업 배경 (오선지·원고지·영어 4선 등)" active={bgOpen} onClick={() => setBgOpen(o => !o)} />
         <CardBtn icon={Eraser} label="지우기" title="이 슬라이드 지우기" danger onClick={onClearAll} />
         <CardBtn icon={Settings} label="설정" onClick={onOpenSettings} />
+        <AnimatePresence>
+          {bgOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+              className="absolute right-0 top-full mt-2 w-[340px] p-3 rounded-2xl bg-white/95 backdrop-blur-xl ring-1 ring-slate-900/[0.07] shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)]"
+              role="dialog" aria-label="수업 배경"
+            >
+              <div className="px-1 pb-2 text-[12px] font-semibold text-slate-500">수업 배경</div>
+              <BackgroundPicker value={background} compact onChange={(bg, scope) => onBackgroundChange(bg, scope)} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </>
   );

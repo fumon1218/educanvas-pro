@@ -1,3 +1,4 @@
+import { drawBackground, type CanvasBackground } from './backgrounds';
 /**
  * 수업 녹화: 판서 캔버스 + 레이저 + (가림막·스포트라이트) + 카메라 작은 화면을
  * 하나의 녹화용 캔버스에 합성하고, 마이크 소리와 함께 MediaRecorder로 녹화한다.
@@ -6,7 +7,7 @@
 export interface RecorderSources {
   container: HTMLElement;
   getLayers: () => (HTMLCanvasElement | null | undefined)[];
-  getBackground: () => { color: string; pattern: 'none' | 'grid' | 'dot'; vpt: number[] };
+  getBackground: () => { kind: CanvasBackground; vpt: number[]; origin?: { x: number; y: number } };
   drawOverlays?: (ctx: CanvasRenderingContext2D, w: number, h: number, scale: number) => void;
 }
 
@@ -206,31 +207,8 @@ export class LessonRecorder {
     const scale = W / cw;
     const bg = this.sources.getBackground();
 
-    // 배경
-    ctx.fillStyle = bg.color;
-    ctx.fillRect(0, 0, W, H);
-    if (bg.pattern !== 'none') {
-      const zoom = bg.vpt[0] || 1;
-      const step = (bg.pattern === 'grid' ? 40 : 24) * zoom * scale;
-      if (step > 4) {
-        const ox = ((bg.vpt[4] || 0) * scale) % step;
-        const oy = ((bg.vpt[5] || 0) * scale) % step;
-        if (bg.pattern === 'grid') {
-          ctx.strokeStyle = '#e5e7eb';
-          ctx.lineWidth = Math.max(1, scale);
-          ctx.beginPath();
-          for (let x = ox; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-          for (let y = oy; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
-          ctx.stroke();
-        } else {
-          ctx.fillStyle = '#d1d5db';
-          const r = 1.5 * scale;
-          for (let x = ox + step / 2; x < W; x += step) {
-            for (let y = oy + step / 2; y < H; y += step) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
-          }
-        }
-      }
-    }
+    // 배경 (수업 템플릿 무늬 포함)
+    drawBackground(ctx, bg.kind, W, H, bg.vpt, scale, bg.origin);
 
     // 판서 캔버스 (완성된 선 + 그리는 중인 선) + 레이저
     for (const layer of this.sources.getLayers()) {

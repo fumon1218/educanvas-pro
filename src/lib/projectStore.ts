@@ -7,6 +7,8 @@ export interface StoredScene {
   name: string;
   data: string | null;
   thumbnail?: string;
+  /** 이 슬라이드만의 배경 (없으면 수업 전체 배경) */
+  background?: string;
 }
 
 export interface StoredProject {
@@ -15,7 +17,7 @@ export interface StoredProject {
   name: string;
   savedAt: string;
   activeSceneId: string;
-  canvasBackground: 'blank' | 'grid' | 'dot' | 'dark';
+  canvasBackground: string;
   scenes: StoredScene[];
 }
 
