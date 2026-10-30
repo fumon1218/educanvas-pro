@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Layout, Moon, Grid, Circle, Square } from 'lucide-react';
+import { X, Layout, Moon, Grid, Circle, Square, LogOut, Users } from 'lucide-react';
+import { useAccess } from '@/src/components/Access/AccessGate';
 import { cn } from '@/src/lib/utils';
 import type { CanvasBackground } from '@/src/components/Canvas/Whiteboard';
 
@@ -33,7 +34,9 @@ const SHORTCUTS: [string, string][] = [
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen, onClose, canvasBackground, onCanvasBackgroundChange, isVertical, onToggleOrientation,
-}) => (
+}) => {
+  const access = useAccess();
+  return (
   <AnimatePresence>
     {isOpen && (
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -53,6 +56,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           <div className="p-6 space-y-8">
+            {access && (
+              <div className="space-y-3">
+                <div className="text-sm font-semibold text-gray-700">계정</div>
+                <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200">
+                  {access.user.photoURL
+                    ? <img src={access.user.photoURL} alt="" referrerPolicy="no-referrer" className="w-9 h-9 rounded-full" />
+                    : <div className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold">{(access.user.displayName || access.user.email || '?')[0]}</div>}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-800 truncate">{access.user.displayName || '선생님'}</div>
+                    <div className="text-xs text-gray-500 truncate">{access.user.email} · {access.role === 'admin' ? '관리자' : '사용자'}</div>
+                  </div>
+                  <button onClick={() => { onClose(); access.signOut(); }} className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">
+                    <LogOut size={14} />로그아웃
+                  </button>
+                </div>
+                {access.role === 'admin' && (
+                  <button onClick={() => { onClose(); access.openAccessManager(); }} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-semibold hover:bg-indigo-100">
+                    <Users size={16} />사용자 관리 (사용 허락할 계정 등록)
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3">
               <div className="text-sm font-semibold text-gray-700">캔버스 배경</div>
               <div className="grid grid-cols-2 gap-3">
@@ -99,4 +125,5 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
     )}
   </AnimatePresence>
-);
+  );
+};

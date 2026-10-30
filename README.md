@@ -17,6 +17,17 @@
 
 단축키는 앱의 **설정** 창에서 볼 수 있습니다.
 
+## 사용 권한 (허락된 계정만 사용)
+
+옥쌤보드는 **Google 로그인 후, 관리자가 허락한 계정만** 사용할 수 있습니다.
+
+- **관리자:** `fumon1218@gmail.com` (`src/lib/access.ts`의 `ADMIN_EMAIL`, `firestore.rules`의 `isAdmin()`에 같이 적혀 있음)
+- **사용 허락하기:** 관리자로 로그인 → **설정 → 사용자 관리** → 상대방의 Google 이메일 입력 → [사용 허락하기]
+- **허락 취소:** 같은 화면에서 휴지통 버튼. 다음에 앱을 열 때부터 들어올 수 없습니다.
+- 허락받지 않은 계정은 "아직 사용 허락을 받지 않은 계정입니다" 화면과 함께 자기 이메일이 표시되므로, 그 이메일을 관리자에게 알려 주면 됩니다.
+
+> 허용 목록과 공유 보드는 서버(Firebase 보안 규칙)에서도 막혀 있습니다. 다만 GitHub Pages에 공개 배포하면 앱 파일(코드) 자체는 누구나 받아 볼 수 있습니다.
+
 ## 실행 방법
 
 **필요한 것:** Node.js 20 이상
@@ -33,15 +44,22 @@ npm run lint         # 타입 검사
 `main` 브랜치에 올리면 GitHub Actions가 자동으로 GitHub Pages에 배포합니다(`.github/workflows/deploy.yml`).
 주소는 `https://<GitHub 아이디>.github.io/educanvas-pro/`입니다. 저장소 이름을 바꾸면 `vite.config.ts`의 `base`도 같이 바꿔야 합니다.
 
-### Firebase 보안 규칙 적용
+### Firebase 설정 (처음 한 번, 필수)
 
-공유 링크 기능의 보안 규칙(`firestore.rules`)은 코드에 포함되어 있지만, **Firebase에 직접 배포해야 적용됩니다.**
+**① 보안 규칙 배포.** 사용 허락 목록과 공유 보드를 지키는 규칙(`firestore.rules`)은 **Firebase에 직접 배포해야 적용됩니다.** 배포하지 않으면 관리자 화면에서 계정을 등록할 수 없습니다.
 
 ```bash
 npm install -g firebase-tools
 firebase login
-firebase deploy --only firestore:rules --project gen-lang-client-0451170730
+cd 이 폴더(압축 푼 곳)
+firebase deploy --only firestore:rules
 ```
+
+이 앱은 Firestore의 기본 데이터베이스가 아니라 `ai-studio-75bb…` 데이터베이스를 씁니다. 위 명령은 포함된 `firebase.json`·`.firebaserc` 설정에 따라 그 데이터베이스에 규칙을 적용합니다. 배포 후 Firebase 콘솔 → Firestore → (해당 데이터베이스) → **규칙** 탭에서 `isAllowed` 내용이 보이면 성공입니다.
+
+**② 로그인 허용 도메인 등록.** [Firebase 콘솔](https://console.firebase.google.com) → 프로젝트 → **Authentication → 설정 → 승인된 도메인**에 `<GitHub 아이디>.github.io`를 추가해야 배포된 주소에서 Google 로그인이 됩니다.
+
+**③ Google 로그인 사용 설정.** Authentication → 로그인 방법에서 **Google**이 사용 설정되어 있는지 확인합니다.
 
 ### AI 기능 (선택)
 
