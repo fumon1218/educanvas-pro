@@ -18,6 +18,7 @@
 | clsx | 2.1.1 | MIT | 스타일 도우미 |
 | tailwind-merge | 3.5.0 | MIT | 스타일 도우미 |
 | tailwindcss | 4.x | MIT | 스타일 |
+| fix-webm-duration | 1.0.6 | MIT | 녹화 영상 길이 정보 보정 |
 | Pretendard (글꼴, CDN) | 1.3.9 | SIL Open Font License 1.1 | 글꼴 |
 
 ## Apache License 2.0 고지

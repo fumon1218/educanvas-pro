@@ -8,6 +8,9 @@ export interface ConfirmState {
   confirmLabel?: string;
   danger?: boolean;
   onConfirm: () => void;
+  /** 두 번째 선택지 (예: '판서만 지우기') */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
 }
 
 export const ConfirmDialog: React.FC<{ state: ConfirmState | null; onClose: () => void }> = ({ state, onClose }) => {
@@ -45,6 +48,14 @@ export const ConfirmDialog: React.FC<{ state: ConfirmState | null; onClose: () =
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200">취소</button>
+              {state.secondaryLabel && state.onSecondary && (
+                <button
+                  onClick={() => { state.onSecondary!(); onClose(); }}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+                >
+                  {state.secondaryLabel}
+                </button>
+              )}
               <button
                 autoFocus
                 onClick={() => { state.onConfirm(); onClose(); }}

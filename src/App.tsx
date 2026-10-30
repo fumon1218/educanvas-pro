@@ -13,6 +13,10 @@ import { FloatingCamera } from './components/UI/FloatingCamera';
 import { PdfImportModal } from './components/UI/PdfImportModal';
 import { CollaborationModal } from './components/UI/CollaborationModal';
 import { ConfirmDialog, ConfirmState } from './components/UI/ConfirmDialog';
+import { PresentationBar } from './components/Present/PresentationBar';
+import { ShadeOverlay, SpotlightOverlay, TimerWidget, createOverlayState, drawOverlaysOnto } from './components/Present/FocusTools';
+import { RecordStartDialog, RecordingStatus, RecordingResultDialog } from './components/Record/RecorderUI';
+import { LessonRecorder, RecordingResult, isRecordingSupported } from './lib/lessonRecorder';
 import { useMultiplayer, SyncData, CursorData } from './hooks/useMultiplayer';
 import { AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -44,6 +48,8 @@ export default function App() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isVertical, setIsVertical] = useState(true);
   const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>('blank');
+  const canvasBgRef = useRef(canvasBackground);
+  canvasBgRef.current = canvasBackground;
 
   // ---------- 슬라이드 ----------
   const [projectName, setProjectName] = useState('새 수업');
@@ -64,6 +70,20 @@ export default function App() {
   const [isCollaborationModalOpen, setIsCollaborationModalOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+
+  // ---------- 발표 모드 · 수업 도구 · 녹화 ----------
+  const [isPresenting, setIsPresenting] = useState(false);
+  const isPresentingRef = useRef(false);
+  isPresentingRef.current = isPresenting;
+  const [shadeOn, setShadeOn] = useState(false);
+  const [spotlightOn, setSpotlightOn] = useState(false);
+  const [timerOn, setTimerOn] = useState(false);
+  const overlayStateRef = useRef(createOverlayState());
+  const recorderRef = useRef<LessonRecorder | null>(null);
+  const [recState, setRecState] = useState<'idle' | 'recording' | 'paused'>('idle');
+  const [recordDialogOpen, setRecordDialogOpen] = useState(false);
+  const [recStarting, setRecStarting] = useState(false);
+  const [recResult, setRecResult] = useState<RecordingResult | null>(null);
   const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
   const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
@@ -244,7 +264,7 @@ export default function App() {
     setMainCanvas(canvas);
     setObjects(canvas.getObjects().filter(o => !o.excludeFromExport).map(o => ({
       id: (o as any).id,
-      type: (o as any).isVideo ? 'video' : (o as any).isAudio ? 'audio' : (o as any).isWebLink ? 'weblink' : o.type,
+      type: (o as any).isBackground ? 'background' : (o as any).isVideo ? 'video' : (o as any).isAudio ? 'audio' : (o as any).isWebLink ? 'weblink' : o.type,
       visible: o.visible,
       locked: !!(o as any).locked,
     })));
@@ -466,12 +486,16 @@ export default function App() {
   }, [handleNextSlide, handlePrevSlide, confirmState]);
 
   const handleClear = useCallback(() => {
+    const hasLocked = !!whiteboardRef.current?.hasLockedContent();
     setConfirmState({
-      title: '이 슬라이드를 모두 지울까요?',
-      message: '실행 취소(Ctrl+Z)로 되돌릴 수 있습니다.',
+      title: hasLocked ? '이 슬라이드를 어떻게 지울까요?' : '이 슬라이드를 모두 지울까요?',
+      message: hasLocked
+        ? 'PDF 배경과 잠근 객체는 남기고 판서만 지울 수 있습니다. 실행 취소(Ctrl+Z)로 되돌릴 수 있습니다.'
+        : '실행 취소(Ctrl+Z)로 되돌릴 수 있습니다.',
       confirmLabel: '모두 지우기',
       danger: true,
-      onConfirm: () => whiteboardRef.current?.clear(),
+      onConfirm: () => whiteboardRef.current?.clear('all'),
+      ...(hasLocked ? { secondaryLabel: '판서만 지우기', onSecondary: () => whiteboardRef.current?.clear('ink') } : {}),
     });
   }, []);
 
@@ -709,6 +733,136 @@ export default function App() {
   };
 
   // =====================================================================
+  // 발표 모드
+  // =====================================================================
+  const fitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleFit = useCallback((delay = 250) => {
+    if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
+    fitTimerRef.current = setTimeout(() => whiteboardRef.current?.fitToContent(), delay);
+  }, []);
+
+  const enterPresentation = useCallback(() => {
+    captureCurrent();
+    setIsPresenting(true);
+    setIsSlideNavigatorOpen(false);
+    if (activeTool === 'select' || activeTool === 'lasso' || activeTool === 'bucket' || activeTool === 'eyedropper') setActiveTool('pen');
+    const el = document.documentElement as any;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) Promise.resolve(req.call(el)).catch(() => {});
+    scheduleFit(400);
+  }, [captureCurrent, activeTool, scheduleFit]);
+
+  const exitPresentation = useCallback(() => {
+    setIsPresenting(false);
+    const d = document as any;
+    if (d.fullscreenElement || d.webkitFullscreenElement) {
+      (d.exitFullscreen || d.webkitExitFullscreen)?.call(d).catch?.(() => {});
+    }
+    setTimeout(() => whiteboardRef.current?.resetZoom(), 300);
+  }, []);
+
+  useEffect(() => {
+    const onFs = () => {
+      const d = document as any;
+      if (!d.fullscreenElement && !d.webkitFullscreenElement && isPresentingRef.current) {
+        setIsPresenting(false);
+        setTimeout(() => whiteboardRef.current?.resetZoom(), 300);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isPresentingRef.current && !(document as any).fullscreenElement) exitPresentation();
+    };
+    document.addEventListener('fullscreenchange', onFs);
+    document.addEventListener('webkitfullscreenchange', onFs);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFs);
+      document.removeEventListener('webkitfullscreenchange', onFs);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [exitPresentation]);
+
+  const handleWhiteboardResize = useCallback(() => {
+    if (isPresentingRef.current) scheduleFit(200);
+  }, [scheduleFit]);
+
+  // =====================================================================
+  // 녹화
+  // =====================================================================
+  const sceneLabel = useCallback((id: string) => {
+    const i = scenesRef.current.findIndex(s => s.id === id);
+    const s = scenesRef.current[i];
+    return s ? `${i + 1}. ${s.name}` : '슬라이드';
+  }, []);
+
+  const startRecording = useCallback(async (opts: { mic: boolean; camera: boolean }) => {
+    const wb = whiteboardRef.current;
+    const container = wb?.getContainer();
+    if (!wb || !container) return;
+    setRecStarting(true);
+    const rec = new LessonRecorder({
+      container,
+      getLayers: () => whiteboardRef.current?.getRecordLayers() ?? [],
+      getBackground: () => ({
+        color: canvasBgRef.current === 'dark' ? '#1a202c' : '#ffffff',
+        pattern: canvasBgRef.current === 'grid' ? 'grid' : canvasBgRef.current === 'dot' ? 'dot' : 'none',
+        vpt: (whiteboardRef.current?.getCanvas()?.viewportTransform as number[]) || [1, 0, 0, 1, 0, 0],
+      }),
+      drawOverlays: (ctx, w, h, scale) => drawOverlaysOnto(ctx, overlayStateRef.current, w, h, scale),
+    });
+    try {
+      await rec.start(opts, sceneLabel(activeIdRef.current));
+      recorderRef.current = rec;
+      setRecState('recording');
+      setRecordDialogOpen(false);
+      toast.success('녹화를 시작했습니다.', { duration: 1500 });
+    } catch (err: any) {
+      rec.cancel();
+      toast.error(err?.message === 'mic' ? '마이크를 사용할 수 없습니다.' : '녹화를 시작하지 못했습니다.', {
+        description: err?.message === 'mic' ? '브라우저 주소창 옆의 권한 설정에서 마이크를 허용하거나, 마이크 없이 녹화해 주세요.' : undefined,
+      });
+    } finally {
+      setRecStarting(false);
+    }
+  }, [sceneLabel]);
+
+  const stopRecording = useCallback(async () => {
+    const rec = recorderRef.current;
+    if (!rec) return;
+    try {
+      const result = await rec.stop();
+      setRecResult(result);
+    } catch (err) {
+      console.error(err);
+      toast.error('녹화 파일을 만들지 못했습니다.');
+    } finally {
+      recorderRef.current = null;
+      setRecState('idle');
+    }
+  }, []);
+
+  // 슬라이드를 넘길 때마다 녹화 구간 기록
+  useEffect(() => {
+    recorderRef.current?.mark(sceneLabel(activeSceneId));
+  }, [activeSceneId, sceneLabel]);
+
+  // 녹화 중 창을 닫으려 하면 경고
+  useEffect(() => {
+    if (recState === 'idle') return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [recState]);
+
+  const openRecordDialog = useCallback(() => {
+    if (!isRecordingSupported()) {
+      toast.error('이 브라우저에서는 녹화를 지원하지 않습니다.', { description: '크롬, 엣지, 최신 사파리를 사용해 주세요.' });
+      return;
+    }
+    setRecordDialogOpen(true);
+  }, []);
+
+  // =====================================================================
   // 기타
   // =====================================================================
   const handleColorPicked = useCallback((c: string) => {
@@ -728,6 +882,7 @@ export default function App() {
     <div className="fixed inset-0 overflow-hidden font-sans bg-white text-gray-900">
       <Toaster position="top-center" richColors closeButton />
 
+      {!isPresenting && (
       <TopNavBar
         projectName={projectName}
         onRenameProject={name => { setProjectName(name); dirtyRef.current = true; }}
@@ -748,7 +903,15 @@ export default function App() {
         isSharing={!!boardId && !!user}
         peerStatus={multiplayer.status}
         peerCount={multiplayer.peers.length + (multiplayer.status === 'connected' ? 1 : 0)}
+        onPresent={enterPresentation}
+        onToggleShade={() => setShadeOn(v => !v)}
+        onToggleSpotlight={() => setSpotlightOn(v => !v)}
+        onToggleTimer={() => setTimerOn(v => !v)}
+        shadeOn={shadeOn}
+        spotlightOn={spotlightOn}
+        timerOn={timerOn}
       />
+      )}
       <input
         ref={projectFileInputRef}
         type="file"
@@ -776,10 +939,13 @@ export default function App() {
           onDrawingStateChange={handleDrawingStateChange}
           onRequestTool={setActiveTool}
           onPointerMove={handlePointerMove}
+          onResize={handleWhiteboardResize}
+          autoFit={isPresenting}
           cursors={visibleCursors}
         />
       </div>
 
+      {!isPresenting && (<>
       <Toolbar
         activeTool={activeTool}
         onToolSelect={setActiveTool}
@@ -816,9 +982,11 @@ export default function App() {
         onBringForward={() => whiteboardRef.current?.bringForward()}
         onSendBackward={() => whiteboardRef.current?.sendBackward()}
       />
+      </>)}
 
       <MediaController selection={mediaSelection} onClose={() => setMediaSelection({ type: 'none' })} />
 
+      {!isPresenting && (
       <BottomNavBar
         onZoomToggle={() => setActiveTool(activeTool === 'pan' ? 'select' : 'pan')}
         isZoomActive={activeTool === 'pan'}
@@ -835,18 +1003,65 @@ export default function App() {
         isCameraOpen={isCameraOpen}
         onToggleCamera={() => setIsCameraOpen(o => !o)}
         isVertical={isVertical}
+        onRecord={openRecordDialog}
+        isRecording={recState !== 'idle'}
+      />
+      )}
+
+      {isPresenting && (
+        <PresentationBar
+          current={currentSceneIndex + 1}
+          total={scenes.length}
+          onPrev={handlePrevSlide}
+          onNext={handleNextSlide}
+          tool={activeTool}
+          onTool={setActiveTool}
+          color={color}
+          onColor={setColor}
+          onUndo={() => whiteboardRef.current?.undo()}
+          onFit={() => whiteboardRef.current?.fitToContent()}
+          shadeOn={shadeOn}
+          onToggleShade={() => setShadeOn(v => !v)}
+          spotlightOn={spotlightOn}
+          onToggleSpotlight={() => setSpotlightOn(v => !v)}
+          timerOn={timerOn}
+          onToggleTimer={() => setTimerOn(v => !v)}
+          onExit={exitPresentation}
+        />
+      )}
+
+      {shadeOn && <ShadeOverlay stateRef={overlayStateRef} onClose={() => setShadeOn(false)} />}
+      {spotlightOn && <SpotlightOverlay stateRef={overlayStateRef} onClose={() => setSpotlightOn(false)} />}
+      {timerOn && <TimerWidget onClose={() => setTimerOn(false)} />}
+
+      {recState !== 'idle' && (
+        <RecordingStatus
+          state={recState}
+          getElapsed={() => recorderRef.current?.elapsed() ?? 0}
+          onPause={() => { recorderRef.current?.pause(); setRecState('paused'); }}
+          onResume={() => { recorderRef.current?.resume(); setRecState('recording'); }}
+          onStop={stopRecording}
+        />
+      )}
+      <RecordStartDialog isOpen={recordDialogOpen} onClose={() => setRecordDialogOpen(false)} onStart={startRecording} starting={recStarting} />
+      <RecordingResultDialog
+        result={recResult}
+        fileBase={`${projectName || '수업'}_녹화_${new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '')}`}
+        onClose={() => setRecResult(null)}
       />
 
       <AnimatePresence>
         {isCameraOpen && <FloatingCamera onClose={() => setIsCameraOpen(false)} />}
       </AnimatePresence>
 
+      {!isPresenting && (
       <Navigator
         mainCanvas={mainCanvas}
         isPinned={isNavigatorPinned}
         onTogglePin={() => setIsNavigatorPinned(p => !p)}
         isZoomActive={activeTool === 'pan'}
       />
+      )}
 
       <SlideNavigator
         isOpen={isSlideNavigatorOpen}

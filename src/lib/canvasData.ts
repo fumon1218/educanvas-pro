@@ -1,7 +1,7 @@
 import * as fabric from 'fabric';
 
 /** 캔버스 직렬화 시 함께 저장할 사용자 정의 속성 */
-export const EXTRA_PROPS = ['id', 'locked', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url'];
+export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url'];
 
 /** 세션 동안 살아 있는 동영상 요소 (blob URL → video element) */
 export const videoRegistry = new Map<string, HTMLVideoElement>();
@@ -153,8 +153,15 @@ export async function createImageScene(dataUrl: string, width: number, height: n
   const safeW = width - 100;
   const safeH = height - 200;
   img.scale(Math.min(safeW / img.width, safeH / img.height));
-  img.set({ cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false });
+  // PDF 페이지는 '배경'으로 잠가서 판서 중에 끌려 움직이지 않게 한다 (레이어에서 잠금 해제 가능)
+  img.set({
+    cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false,
+    selectable: false, evented: false,
+    lockMovementX: true, lockMovementY: true, lockRotation: true, lockScalingX: true, lockScalingY: true,
+  });
   (img as any).id = newId();
+  (img as any).locked = true;
+  (img as any).isBackground = true;
   sc.add(img);
   sc.centerObject(img);
   const out = serializeCanvas(sc);

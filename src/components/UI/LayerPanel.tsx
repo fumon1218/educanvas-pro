@@ -23,7 +23,7 @@ interface LayerPanelProps {
 
 const TYPE_LABELS: Record<string, string> = {
   path: '펜 선', 'i-text': '글자', text: '글자', textbox: '글자 상자', image: '사진', rect: '사각형', circle: '원',
-  ellipse: '타원', triangle: '삼각형', polygon: '다각형', line: '직선', group: '그룹', video: '동영상', audio: '소리', weblink: '웹 링크',
+  ellipse: '타원', triangle: '삼각형', polygon: '다각형', line: '직선', group: '그룹', video: '동영상', audio: '소리', weblink: '웹 링크', background: 'PDF 배경',
 };
 
 export const LayerPanel: React.FC<LayerPanelProps> = React.memo(({

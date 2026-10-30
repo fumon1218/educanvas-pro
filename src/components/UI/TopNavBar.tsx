@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown, Users, Share, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Sparkles, ArrowRight,
-  Download, Upload, File as FileIcon,
+  Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -26,6 +26,13 @@ interface TopNavBarProps {
   isSharing?: boolean;
   peerStatus?: 'disconnected' | 'connecting' | 'connected' | 'error';
   peerCount?: number;
+  onPresent: () => void;
+  onToggleShade: () => void;
+  onToggleSpotlight: () => void;
+  onToggleTimer: () => void;
+  shadeOn?: boolean;
+  spotlightOn?: boolean;
+  timerOn?: boolean;
 }
 
 const MenuItem: React.FC<{ icon: React.ElementType; label: string; hint?: string; onClick: () => void }> = ({ icon: Icon, label, hint, onClick }) => (
@@ -40,6 +47,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   projectName, onRenameProject, onSave, onLoad, onExportFile, onImportFile, onExportPDF, onExportCurrentPDF,
   onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
   isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
+  onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false,
 }) => {
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -138,6 +146,14 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
         {/* 오른쪽: 협업 / 공유 / AI */}
         <div className="flex items-center gap-2 pointer-events-auto">
           <button
+            onClick={onPresent}
+            className="flex items-center gap-2 px-4 py-1.5 bg-gray-900 text-white rounded-full shadow-sm hover:shadow-md hover:bg-black transition-all text-sm font-semibold"
+            title="발표 모드 (전체 화면)"
+          >
+            <Presentation size={14} />
+            발표
+          </button>
+          <button
             onClick={onOpenMultiplayer}
             className={cn(
               'flex items-center gap-2 px-4 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all text-sm font-medium',
@@ -188,6 +204,16 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
 
       <div className="flex justify-end items-center h-14 px-4 mt-1">
         <div className="flex items-center gap-2 pointer-events-auto">
+          <button onClick={onToggleShade} className={cn(pill, 'p-2.5 hover:bg-gray-50', shadeOn ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-600')} title="가림막 (화면 아래 가리기)" aria-label="가림막" aria-pressed={shadeOn}>
+            <PanelBottomClose size={18} />
+          </button>
+          <button onClick={onToggleSpotlight} className={cn(pill, 'p-2.5 hover:bg-gray-50', spotlightOn ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-600')} title="스포트라이트" aria-label="스포트라이트" aria-pressed={spotlightOn}>
+            <Flashlight size={18} />
+          </button>
+          <button onClick={onToggleTimer} className={cn(pill, 'p-2.5 hover:bg-gray-50', timerOn ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-600')} title="타이머" aria-label="타이머" aria-pressed={timerOn}>
+            <Timer size={18} />
+          </button>
+          <div className="w-px h-6 bg-gray-300 mx-1" />
           <button onClick={onClearAll} className={cn(pill, 'p-2.5 text-gray-600 hover:bg-red-50 hover:text-red-500 hover:border-red-200')} title="이 슬라이드 모두 지우기" aria-label="이 슬라이드 모두 지우기">
             <Trash2 size={18} />
           </button>

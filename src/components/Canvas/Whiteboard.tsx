@@ -51,6 +51,9 @@ interface WhiteboardProps {
   onDrawingStateChange?: (isDrawing: boolean) => void;
   onRequestTool?: (tool: ToolType) => void;
   onPointerMove?: (x: number, y: number) => void;
+  onResize?: () => void;
+  /** 슬라이드를 열 때 내용이 화면에 꽉 차도록 맞춤 (발표 모드) */
+  autoFit?: boolean;
   cursors?: RemoteCursor[];
 }
 
@@ -60,7 +63,14 @@ export interface WhiteboardHandle {
   addImages: (dataUrls: string[]) => Promise<void>;
   addWebLink: (url: string) => void;
   addShape: (type: 'rect' | 'circle' | 'ellipse' | 'triangle' | 'polygon' | 'line' | 'arrow') => void;
-  clear: () => void;
+  /** ink: 잠긴 객체·PDF 배경은 남기고 판서만 지움 / all: 모두 지움 */
+  clear: (mode?: 'ink' | 'all') => void;
+  hasLockedContent: () => boolean;
+  fitToContent: () => void;
+  getLaserCanvas: () => HTMLCanvasElement | null;
+  /** 녹화용: [판서 캔버스, 그리는 중인 선 캔버스, 레이저 캔버스] */
+  getRecordLayers: () => (HTMLCanvasElement | null)[];
+  getContainer: () => HTMLDivElement | null;
   undo: () => void;
   redo: () => void;
   zoomIn: () => void;
@@ -167,7 +177,9 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const laserRef = useRef<fabric.Circle | null>(null);
+  const laserCanvasRef = useRef<HTMLCanvasElement>(null);
+  const laserPointsRef = useRef<{ x: number; y: number; t: number }[]>([]);
+  const laserAnimRef = useRef<number | null>(null);
   const eraserCursorRef = useRef<fabric.Circle | null>(null);
   const isErasingRef = useRef(false);
   const erasedRef = useRef(false);
@@ -328,6 +340,86 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     canvas.discardActiveObject();
     canvas.setActiveObject(objs.length === 1 ? objs[0] : new fabric.ActiveSelection(objs, { canvas }));
     canvas.requestRenderAll();
+  }, []);
+
+  // ---------- 레이저 포인터 (잔상이 남았다가 사라짐, 저장되지 않음) ----------
+  const drawLaser = useCallback(() => {
+    const el = laserCanvasRef.current;
+    if (!el) { laserAnimRef.current = null; return; }
+    const ctx = el.getContext('2d');
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const now = performance.now();
+    const LIFE = 700;
+    const pts = laserPointsRef.current.filter(p => now - p.t < LIFE);
+    laserPointsRef.current = pts;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, el.width, el.height);
+    if (pts.length > 0) {
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (let i = 1; i < pts.length; i++) {
+        const a = 1 - (now - pts[i].t) / LIFE;
+        ctx.strokeStyle = `rgba(239, 68, 68, ${Math.max(0, a) * 0.85})`;
+        ctx.lineWidth = 3 + a * 5;
+        ctx.beginPath();
+        ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+        ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.stroke();
+      }
+      const last = pts[pts.length - 1];
+      const fresh = now - last.t < 250;
+      if (fresh) {
+        ctx.shadowColor = '#ef4444';
+        ctx.shadowBlur = 16;
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(last.x, last.y, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+      laserAnimRef.current = requestAnimationFrame(drawLaser);
+    } else {
+      laserAnimRef.current = null;
+    }
+  }, []);
+
+  const pushLaserPoint = useCallback((e: any) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const x = (e.clientX ?? e.touches?.[0]?.clientX ?? 0) - rect.left;
+    const y = (e.clientY ?? e.touches?.[0]?.clientY ?? 0) - rect.top;
+    laserPointsRef.current.push({ x, y, t: performance.now() });
+    if (laserPointsRef.current.length > 120) laserPointsRef.current.shift();
+    if (laserAnimRef.current == null) laserAnimRef.current = requestAnimationFrame(drawLaser);
+  }, [drawLaser]);
+
+  // ---------- 내용 전체가 화면에 들어오도록 맞추기 ----------
+  const fitToContent = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const objs = canvas.getObjects().filter(o => !isHelper(o) && o.visible !== false);
+    if (objs.length === 0) {
+      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      propsRef.current.onZoomChange?.(1);
+      forceRender(n => n + 1);
+      return;
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    objs.forEach(o => {
+      const r = o.getBoundingRect();
+      minX = Math.min(minX, r.left); minY = Math.min(minY, r.top);
+      maxX = Math.max(maxX, r.left + r.width); maxY = Math.max(maxY, r.top + r.height);
+    });
+    const pad = 24;
+    const w = maxX - minX, h = maxY - minY;
+    const zoom = Math.min(3, Math.max(0.1, Math.min((canvas.width - pad * 2) / w, (canvas.height - pad * 2) / h)));
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    canvas.setViewportTransform([zoom, 0, 0, zoom, canvas.width / 2 - cx * zoom, canvas.height / 2 - cy * zoom]);
+    canvas.requestRenderAll();
+    propsRef.current.onZoomChange?.(zoom);
+    forceRender(n => n + 1);
   }, []);
 
   // ---------- 화면 중앙 배치 ----------
@@ -621,23 +713,34 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         addAndSelect(shape);
       }
     },
-    clear: () => {
+    clear: (mode: 'ink' | 'all' = 'all') => {
       const canvas = fabricRef.current;
       if (!canvas) return;
       canvas.discardActiveObject();
-      canvas.remove(...canvas.getObjects().filter(o => !isHelper(o)));
-      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      const targets = canvas.getObjects().filter(o => !isHelper(o) && (mode === 'all' || (!isLocked(o) && !(o as any).isBackground)));
+      canvas.remove(...targets);
+      if (mode === 'all') {
+        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        propsRef.current.onZoomChange?.(1);
+      }
       canvas.requestRenderAll();
-      propsRef.current.onZoomChange?.(1);
       commitChange();
     },
+    hasLockedContent: () => !!fabricRef.current?.getObjects().some(o => !isHelper(o) && (isLocked(o) || (o as any).isBackground)),
+    fitToContent: () => fitToContent(),
+    getLaserCanvas: () => laserCanvasRef.current,
+    getRecordLayers: () => {
+      const c: any = fabricRef.current;
+      return [c?.lowerCanvasEl ?? null, c?.upperCanvasEl ?? null, laserCanvasRef.current];
+    },
+    getContainer: () => containerRef.current,
     copy: handleCopy,
     paste: handlePaste,
     cut: handleCut,
     deleteSelected: handleDeleteSelected,
     group: handleGroup,
     ungroup: handleUngroup,
-  }), [undo, redo, commitChange, applyToolState, selectObjects, placeAtCenter, addAndSelect, getCanvas, handleImagesAdd, handleCopy, handlePaste, handleCut, handleDeleteSelected, handleGroup, handleUngroup]);
+  }), [undo, redo, commitChange, applyToolState, selectObjects, fitToContent, placeAtCenter, addAndSelect, getCanvas, handleImagesAdd, handleCopy, handlePaste, handleCut, handleDeleteSelected, handleGroup, handleUngroup]);
 
   // ---------- 캔버스 초기화 (한 번) ----------
   useEffect(() => {
@@ -776,13 +879,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
       const p = canvas.getScenePoint(e);
       if (t === 'laser') {
-        laserRef.current = new fabric.Circle({
-          radius: 7 / canvas.getZoom(), fill: '#ef4444', left: p.x, top: p.y, originX: 'center', originY: 'center',
-          selectable: false, evented: false, excludeFromExport: true,
-          shadow: new fabric.Shadow({ color: '#ef4444', blur: 14, offsetX: 0, offsetY: 0 }),
-        });
-        canvas.add(laserRef.current);
-        canvas.requestRenderAll();
+        pushLaserPoint(e);
       } else if (t === 'eraser') {
         isErasingRef.current = true;
         erasedRef.current = false;
@@ -827,10 +924,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         return;
       }
       const p = canvas.getScenePoint(e);
-      if (t === 'laser' && laserRef.current) {
-        laserRef.current.set({ left: p.x, top: p.y });
-        canvas.bringObjectToFront(laserRef.current);
-        canvas.requestRenderAll();
+      if (t === 'laser') {
+        pushLaserPoint(e);
       } else if (t === 'eraser') {
         showEraserCursor(p);
         if (isErasingRef.current) eraseAt(p);
@@ -846,11 +941,6 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       const wasPanning = pan.dragging;
       pan.dragging = false;
       if (wasPanning) canvas.setCursor(toolRef.current === 'pan' || pan.spaceDown ? 'grab' : 'default');
-      if (laserRef.current) {
-        canvas.remove(laserRef.current);
-        laserRef.current = null;
-        canvas.requestRenderAll();
-      }
       const erased = isErasingRef.current && erasedRef.current;
       isErasingRef.current = false;
       isDrawingRef.current = false;
@@ -996,6 +1086,13 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     const ro = new ResizeObserver(() => {
       canvas.setDimensions({ width: container.clientWidth, height: container.clientHeight });
       canvas.requestRenderAll();
+      const lc = laserCanvasRef.current;
+      if (lc) {
+        const dpr = window.devicePixelRatio || 1;
+        lc.width = Math.round(container.clientWidth * dpr);
+        lc.height = Math.round(container.clientHeight * dpr);
+      }
+      propsRef.current.onResize?.();
     });
     ro.observe(container);
 
@@ -1030,7 +1127,6 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     if (notifyTimerRef.current) clearTimeout(notifyTimerRef.current);
     if (historyTimerRef.current) clearTimeout(historyTimerRef.current);
     canvas.discardActiveObject();
-    laserRef.current = null;
     eraserCursorRef.current = null;
     (async () => {
       try {
@@ -1041,7 +1137,9 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
       if (token !== loadTokenRef.current) return; // 더 최근의 불러오기가 시작됨
       afterLoad();
-      if (switchingScene) {
+      if (propsRef.current.autoFit) {
+        fitToContent();
+      } else if (switchingScene) {
         canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
         propsRef.current.onZoomChange?.(1);
       }
@@ -1137,6 +1235,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }}
     >
       <canvas ref={canvasRef} />
+      <canvas ref={laserCanvasRef} className="absolute inset-0 pointer-events-none z-[90]" style={{ width: '100%', height: '100%' }} aria-hidden="true" />
 
       {/* 다른 참여자의 커서 */}
       {cursors?.map(cursor => {

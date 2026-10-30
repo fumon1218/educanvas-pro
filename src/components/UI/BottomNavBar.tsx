@@ -20,6 +20,8 @@ interface BottomNavBarProps {
   onToggleCamera?: () => void;
   isZenMode?: boolean;
   isVertical?: boolean;
+  onRecord?: () => void;
+  isRecording?: boolean;
 }
 
 export const BottomNavBar: React.FC<BottomNavBarProps> = ({ 
@@ -38,7 +40,9 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   isCameraOpen = false,
   onToggleCamera,
   isZenMode = false,
-  isVertical = true
+  isVertical = true,
+  onRecord,
+  isRecording = false,
 }) => {
   const zoomPercent = Math.round(zoomLevel * 100);
 
@@ -113,9 +117,24 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
                 isCameraOpen ? "text-blue-600 bg-blue-50" : "text-gray-500 hover:bg-gray-100"
               )} 
               title={isCameraOpen ? "카메라 끄기" : "카메라 켜기"}
+              aria-label={isCameraOpen ? "카메라 끄기" : "카메라 켜기"}
             >
               <Video size={20} strokeWidth={1.5} />
             </button>
+            {onRecord && (
+              <button
+                onClick={onRecord}
+                disabled={isRecording}
+                className={cn(
+                  "p-3 rounded-full transition-colors",
+                  isRecording ? "text-red-500 bg-red-50" : "text-red-500 hover:bg-red-50"
+                )}
+                title={isRecording ? "녹화 중" : "수업 녹화"}
+                aria-label={isRecording ? "녹화 중" : "수업 녹화"}
+              >
+                <Circle size={20} strokeWidth={1.5} fill={isRecording ? 'currentColor' : 'none'} />
+              </button>
+            )}
           </div>
         </div>
       </div>
