@@ -1,0 +1,40 @@
+{
+  "name": "okssam-board-desktop",
+  "productName": "옥쌤보드",
+  "version": "0.8.0",
+  "description": "옥쌤보드 데스크톱: 수업 창 안에서 모든 웹사이트(네이버·다음 등)를 여는 설치형 프로그램",
+  "main": "main.js",
+  "author": "옥쌤",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:win": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.okssam.board",
+    "productName": "옥쌤보드",
+    "artifactName": "OkssamBoard-${version}-${os}-${arch}.${ext}",
+    "directories": { "buildResources": "build", "output": "release" },
+    "files": ["main.js", "preload.js", "package.json"],
+    "afterPack": "./adhoc-sign.js",
+    "mac": {
+      "category": "public.app-category.education",
+      "target": [{ "target": "dmg", "arch": ["universal"] }],
+      "identity": null,
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSCameraUsageDescription": "수업 녹화와 카메라 화면에 카메라를 씁니다.",
+        "NSMicrophoneUsageDescription": "수업 녹화에 마이크를 씁니다."
+      }
+    },
+    "dmg": { "title": "옥쌤보드" },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "shortcutName": "옥쌤보드" }
+  }
+}

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { TabCaptureView } from './TabCaptureView';
+import { DesktopWebView, isDesktopApp, type DesktopWebHandle } from './DesktopWebView';
+import { ArrowLeft, ArrowRight as ArrowFwd } from 'lucide-react';
 import { YouTubePlayer, parseYouTube, type YouTubeHandle, type YouTubeTarget } from './YouTubePlayer';
 import { getYouTubeKey, setYouTubeKey, searchYouTube, type YouTubeResult } from '@/src/lib/youtubeSearch';
 import { ExternalLink, RotateCw, ArrowRight, Pin, Info, Scissors } from 'lucide-react';
@@ -192,6 +194,7 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
 
   const [ytSearch, setYtSearch] = useState<string | null>(null);
   const ytRef = useRef<YouTubeHandle>(null);
+  const deskRef = useRef<DesktopWebHandle>(null);
   const ytTarget = React.useMemo<YouTubeTarget | null>(() => {
     if (!current || current.kind !== 'youtube') return null;
     const t = parseYouTube(current.original);
@@ -202,6 +205,15 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
     // 주소가 아닌 낱말은 유튜브 검색어로 본다
     if (raw.trim() && !/[.:/]/.test(raw.trim())) { setCurrent(null); setError(null); setYtSearch(raw.trim()); return; }
     const r = toEmbeddableUrl(raw, withClip);
+    // 데스크톱 프로그램: 영상 재생 말고는 모두 진짜 브라우저로
+    if (isDesktopApp() && r && r.kind !== 'youtube') {
+      const original = sanitizeUrl(raw)!;
+      setYtSearch(null); setError(null);
+      setCurrent({ url: original, original, kind: 'desktop' });
+      setInput(original);
+      onTitle?.(new URL(original).hostname.replace(/^www\./, ''));
+      return;
+    }
     if (r?.kind === 'youtube-home') {
       const u = new URL(r.url);
       setCurrent(null); setError(null);
@@ -249,7 +261,13 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
         className="flex items-center gap-1.5 px-2 py-1.5 border-b border-slate-200 bg-white"
         onSubmit={e => { e.preventDefault(); go(input); }}
       >
-        <button type="button" onClick={() => setReloadKey(k => k + 1)} disabled={!current} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30" title="새로 고침" aria-label="새로 고침">
+        {current?.kind === 'desktop' && (
+          <>
+            <button type="button" onClick={() => deskRef.current?.back()} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" title="뒤로" aria-label="뒤로"><ArrowLeft size={15} /></button>
+            <button type="button" onClick={() => deskRef.current?.forward()} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" title="앞으로" aria-label="앞으로"><ArrowFwd size={15} /></button>
+          </>
+        )}
+        <button type="button" onClick={() => (current?.kind === 'desktop' ? deskRef.current?.reload() : setReloadKey(k => k + 1))} disabled={!current} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30" title="새로 고침" aria-label="새로 고침">
           <RotateCw size={15} />
         </button>
         <input
@@ -303,6 +321,8 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
             initial={ytSearch}
             onPaste={url => go(url)}
           />
+        ) : current?.kind === 'desktop' ? (
+          <DesktopWebView ref={deskRef} url={current.original} onNavigate={u => setInput(u)} onTitle={t => onTitle?.(t.slice(0, 40))} />
         ) : current?.kind === 'capture' ? (
           <TabCaptureView key={current.original} url={current.original} host={new URL(current.original).hostname.replace(/^www\./, '')} registerVideo={registerVideo} />
         ) : current?.kind === 'youtube' && ytTarget ? (
