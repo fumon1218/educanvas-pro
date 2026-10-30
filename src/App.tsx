@@ -1336,7 +1336,7 @@ export default function App() {
       <div
         className={cn(
           'absolute z-0 overflow-hidden transition-[inset,border-radius] duration-300',
-          isPresenting ? 'inset-0' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
+          isPresenting ? 'inset-0' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[88px] lg:left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
         )}
       >
         <Whiteboard

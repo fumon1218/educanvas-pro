@@ -114,12 +114,12 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
       aria-label={title || label}
       aria-pressed={active}
       className={cn(
-        'flex flex-col items-center justify-center gap-1 min-w-[64px] px-2 h-[56px] rounded-xl transition-colors',
+        'flex flex-col items-center justify-center gap-1 min-w-[44px] lg:min-w-[64px] px-2 h-[44px] lg:h-[56px] rounded-xl transition-colors',
         active ? 'bg-indigo-50 text-indigo-700' : danger ? 'text-slate-600 hover:bg-red-50 hover:text-red-600' : 'text-slate-600 hover:bg-slate-900/[0.05]',
       )}
     >
       <Icon size={19} strokeWidth={1.8} />
-      <span className="text-[11px] font-medium leading-none whitespace-nowrap">{label}</span>
+      <span className="hidden lg:block text-[11px] font-medium leading-none whitespace-nowrap">{label}</span>
     </button>
   );
 
@@ -207,7 +207,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
           title="방 코드로 실시간 함께 그리기"
         >
           <Users size={16} />
-          {peerStatus === 'connected' ? `협업 중 · ${peerCount}명` : '협업'}
+          <span className="hidden lg:inline">{peerStatus === 'connected' ? `협업 중 · ${peerCount}명` : '협업'}</span>
         </button>
         <button onClick={onShare} className="flex items-center gap-2 h-10 px-4 rounded-xl bg-indigo-600 text-white text-[14px] font-semibold hover:bg-indigo-700 shadow-[0_6px_14px_-4px_rgba(79,70,229,0.55)]" title="Google 로그인으로 공유 링크 만들기">
           <Share size={15} />
