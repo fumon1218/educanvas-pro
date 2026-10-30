@@ -33,7 +33,15 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run ${{ matrix.script }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run ${{ matrix.script }} 2>&1 | tee build.log
+      - name: Show build error
+        if: failure()
+        working-directory: desktop
+        shell: bash
+        run: echo "::error::$(tail -c 3500 build.log | tr '\n' ' ' | tr -d '%')"
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.os }}
