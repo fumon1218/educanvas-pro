@@ -5,6 +5,7 @@ import { isBackgroundId, isDarkBackground, backgroundColor } from './lib/backgro
 import { StudentCaster, makeCastCode, castUrl, type CastView, type Poll, type StudentState } from './lib/studentCast';
 import { StudentResponsePanel } from './components/Cast/StudentResponsePanel';
 import { StudentCastModal } from './components/Cast/StudentCastModal';
+import { DriveLessonsModal } from './components/UI/DriveLessonsModal';
 import { Toolbar } from './components/UI/Toolbar';
 import { MediaController } from './components/UI/MediaController';
 import { ScoreDock } from './components/UI/ScoreDock';
@@ -129,6 +130,11 @@ export default function App() {
   const pendingRemoteRef = useRef(false);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(false);
+  /** 드라이브에 아직 올리지 않은 변경 */
+  const driveDirtyRef = useRef(false);
+  const markDirty = useCallback(() => { dirtyRef.current = true; driveDirtyRef.current = true; }, []);
+  // 수업 고유 번호와 드라이브 파일
+  const lessonRef = useRef<{ lessonId: string; fileId: string | null; modified: string | null }>({ lessonId: newId() + newId(), fileId: null, modified: null });
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'error'>('saved');
   const saveErrorRef = useRef(false);
 
@@ -244,7 +250,7 @@ export default function App() {
     if (!prev || prev.data === data) return;
     const thumbnail = wb.getThumbnail();
     updateScenes(list => list.map(s => (s.id === id ? { ...s, data, thumbnail } : s)));
-    dirtyRef.current = true;
+    markDirty();
     scheduleFirestoreSync(id);
     const updated = scenesRef.current.find(s => s.id === id);
     if (updated) broadcastScene(updated);
@@ -309,7 +315,7 @@ export default function App() {
     if (sceneId !== activeIdRef.current) return;
     const thumbnail = whiteboardRef.current?.getThumbnail();
     updateScenes(list => list.map(s => (s.id === sceneId ? { ...s, data, thumbnail } : s)));
-    dirtyRef.current = true;
+    markDirty();
     scheduleFirestoreSync(sceneId);
     const scene = scenesRef.current.find(s => s.id === sceneId);
     if (scene) broadcastScene(scene);
@@ -492,7 +498,7 @@ export default function App() {
         const idx = scenesRef.current.findIndex(s => s.id === id);
         updateScenes(list => list.filter(s => s.id !== id));
         if (activeIdRef.current === id) setActiveSceneId(scenesRef.current[Math.max(0, idx - 1)].id);
-        dirtyRef.current = true;
+        markDirty();
         publishStructure([id]);
       },
     });
@@ -552,6 +558,9 @@ export default function App() {
       activeSceneId: activeIdRef.current,
       canvasBackground,
       scenes: scenesRef.current.map(({ id, name, data, thumbnail, background }) => ({ id, name, data, thumbnail, ...(background ? { background } : {}) })),
+      lessonId: lessonRef.current.lessonId,
+      ...(lessonRef.current.fileId ? { driveFileId: lessonRef.current.fileId } : {}),
+      ...(lessonRef.current.modified ? { driveModified: lessonRef.current.modified } : {}),
     };
   }, [captureCurrent, projectName, canvasBackground]);
 
@@ -573,6 +582,7 @@ export default function App() {
     const list: Scene[] = p.scenes.map((s, i) => ({ id: s.id, name: s.name, data: normalizeSceneData(s.data), thumbnail: s.thumbnail, order: i, ...(isBackgroundId(s.background) ? { background: s.background } : {}) }));
     const removed = scenesRef.current.filter(s => !list.some(n => n.id === s.id)).map(s => s.id);
     setProjectName(p.name || '수업');
+    lessonRef.current = { lessonId: p.lessonId || newId() + newId(), fileId: p.driveFileId || null, modified: p.driveModified || null };
     if (isBackgroundId(p.canvasBackground)) setCanvasBackground(p.canvasBackground);
     updateScenes(() => list);
     const target = list.some(s => s.id === p.activeSceneId) ? p.activeSceneId : list[0].id;
@@ -581,6 +591,157 @@ export default function App() {
     dirtyRef.current = false;
     if (opts.publish) publishStructure(removed);
   }, [updateScenes, bumpRevision, setActiveSceneId, publishStructure]);
+
+  // =====================================================================
+  // 구글 드라이브 동기화
+  // =====================================================================
+  const [driveOn, setDriveOn] = useState(() => { try { return localStorage.getItem('okssam_drive_sync') === '1'; } catch { return false; } });
+  const driveOnRef = useRef(driveOn);
+  driveOnRef.current = driveOn;
+  const [driveState, setDriveState] = useState<'off' | 'synced' | 'saving' | 'pending' | 'need-auth' | 'error' | 'conflict'>(driveOn ? 'pending' : 'off');
+  const [lessonsOpen, setLessonsOpen] = useState(false);
+  const driveBusyRef = useRef(false);
+
+  const driveTokenOrNull = useCallback(async (interactive: boolean) => {
+    const { cachedToken, connectDrive } = await import('./lib/driveSync');
+    const t = cachedToken();
+    if (t) return t;
+    if (!interactive) { setDriveState('need-auth'); return null; }
+    try { return await connectDrive(); }
+    catch (e: any) { if (e?.code !== 'cancelled') toast.error('구글 드라이브에 연결하지 못했습니다.', { description: e?.message }); setDriveState('need-auth'); return null; }
+  }, []);
+
+  /** 드라이브에 저장. force: 다른 기기의 더 새 버전을 덮어쓴다 */
+  const saveToDrive = useCallback(async (opts: { manual?: boolean; force?: boolean } = {}) => {
+    if (!driveOnRef.current || driveBusyRef.current) return;
+    const token = await driveTokenOrNull(!!opts.manual);
+    if (!token) return;
+    driveBusyRef.current = true;
+    setDriveState('saving');
+    const id = opts.manual ? toast.loading('구글 드라이브에 저장하는 중…') : undefined;
+    try {
+      const sync = await import('./lib/driveSync');
+      const proj = buildProject();
+      const cur = lessonRef.current;
+      // 다른 기기에서 더 최근에 고쳤는지 확인
+      if (cur.fileId && cur.modified && !opts.force) {
+        const remote = await sync.getModified(token, cur.fileId);
+        if (remote && remote !== cur.modified) {
+          setDriveState('conflict');
+          if (id) toast.dismiss(id);
+          setConfirmState({
+            title: '다른 기기에서 더 최근에 고친 수업입니다',
+            message: `드라이브의 '${proj.name}'이(가) ${new Date(remote).toLocaleString('ko-KR')}에 다른 곳에서 바뀌었습니다.\n이 기기의 내용으로 덮어쓰면 그 변경은 사라집니다.`,
+            confirmLabel: '이 기기 것으로 덮어쓰기',
+            danger: true,
+            secondaryLabel: '드라이브 것 불러오기',
+            onSecondary: () => { void openDriveLesson({ id: cur.fileId!, name: proj.name, modifiedTime: remote }); },
+            onConfirm: () => { void saveToDrive({ manual: true, force: true }); },
+          });
+          return;
+        }
+      }
+      driveDirtyRef.current = false;
+      const ids = sync.modelIdsOf(proj);
+      if (ids.length) await sync.uploadMissingModels(token, ids);
+      const res = await sync.saveLesson(token, { ...proj, lessonId: cur.lessonId }, cur.fileId);
+      lessonRef.current = { ...lessonRef.current, fileId: res.id, modified: res.modifiedTime };
+      setDriveState(driveDirtyRef.current ? 'pending' : 'synced');
+      // 드라이브 정보도 이 기기 저장에 남긴다
+      saveProject(buildProject()).catch(() => {});
+      if (id) toast.success('구글 드라이브에 저장했습니다.', { id, description: "'옥쌤보드' 폴더 · 다른 기기에서 [내 수업]으로 열 수 있습니다." });
+    } catch (e: any) {
+      driveDirtyRef.current = true;
+      setDriveState(e?.code === 'need-auth' ? 'need-auth' : 'error');
+      if (id) toast.error('드라이브에 저장하지 못했습니다.', { id, description: e?.message });
+      else if (e?.code !== 'need-auth' && e?.code !== 'network') warnOnce('drive-error', () => toast.error('구글 드라이브 저장에 문제가 있습니다.', { description: e?.message }));
+    } finally {
+      driveBusyRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildProject, driveTokenOrNull]);
+
+  /** 드라이브의 수업 열기 (3D 모델도 받아 옴) */
+  const openDriveLesson = useCallback(async (l: { id: string; name: string; modifiedTime: string }) => {
+    const token = await driveTokenOrNull(true);
+    if (!token) return;
+    const id = toast.loading(`'${l.name}'을(를) 여는 중…`);
+    try {
+      const sync = await import('./lib/driveSync');
+      const p = await sync.loadLesson(token, l.id);
+      if (!isValidProject(p)) throw new Error('옥쌤보드 수업 파일이 아닙니다.');
+      const got = await sync.downloadMissingModels(token, sync.modelIdsOf(p)).catch(() => 0);
+      const opened = { ...p, driveFileId: l.id, driveModified: l.modifiedTime };
+      applyProject(opened, { publish: true });
+      driveDirtyRef.current = false;
+      setDriveState('synced');
+      // 화면이 바뀌기 전의 캔버스를 저장하지 않도록, 받은 수업을 그대로 이 기기에 저장
+      saveProject(opened).catch(() => {});
+      setLessonsOpen(false);
+      toast.success(`'${l.name}'을(를) 열었습니다.`, { id, description: got ? `3D 모델 ${got}개를 드라이브에서 받아 왔습니다.` : undefined });
+    } catch (e: any) {
+      toast.error('수업을 열지 못했습니다.', { id, description: e?.message });
+    }
+  }, [driveTokenOrNull, applyProject, buildProject]);
+
+  const enableDrive = useCallback(async () => {
+    const { connectDrive } = await import('./lib/driveSync');
+    try {
+      await connectDrive();
+      try { localStorage.setItem('okssam_drive_sync', '1'); } catch { /* 무시 */ }
+      setDriveOn(true);
+      driveOnRef.current = true;
+      driveDirtyRef.current = true;
+      setDriveState('pending');
+      void saveToDrive({ manual: true });
+      return true;
+    } catch (e: any) {
+      if (e?.code !== 'cancelled') toast.error('구글 드라이브에 연결하지 못했습니다.', { description: e?.message });
+      return false;
+    }
+  }, [saveToDrive]);
+
+  const disableDrive = useCallback(() => {
+    try { localStorage.removeItem('okssam_drive_sync'); } catch { /* 무시 */ }
+    setDriveOn(false);
+    setDriveState('off');
+    toast.success('이 기기에서 드라이브 저장을 껐습니다.', { description: '드라이브에 있는 수업은 그대로 남아 있습니다.' });
+  }, []);
+
+  const newLesson = useCallback(async () => {
+    if (driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
+    const first: Scene = { id: newId(), name: '슬라이드 1', data: null, order: 0 };
+    applyProject({ format: 'educanvas-project', version: 1, name: '새 수업', savedAt: new Date().toISOString(), activeSceneId: first.id, canvasBackground: 'blank', scenes: [{ id: first.id, name: first.name, data: null }] }, { publish: true });
+    lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null };
+    setLessonsOpen(false);
+    toast.success('새 수업을 시작했습니다.', { description: '이름을 바꾸려면 위쪽 수업 이름을 누르세요.' });
+  }, [saveToDrive, applyProject]);
+
+  // 드라이브 자동 저장: 바뀐 것이 있으면 30초마다 (그리는 중에는 기다림)
+  useEffect(() => {
+    if (!driveOn) return;
+    const t = setInterval(() => {
+      if (driveDirtyRef.current && !isDrawingRef.current && !driveBusyRef.current) void saveToDrive({});
+      else if (driveDirtyRef.current) setDriveState(s => (s === 'synced' ? 'pending' : s));
+    }, 30_000);
+    const onHide = () => { if (document.visibilityState === 'hidden' && driveDirtyRef.current) void saveToDrive({}); };
+    document.addEventListener('visibilitychange', onHide);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onHide); };
+  }, [driveOn, saveToDrive]);
+
+  // 표시용: 바뀌면 '올릴 것 있음'
+  useEffect(() => {
+    if (!driveOn) return;
+    const t = setInterval(() => { if (driveDirtyRef.current) setDriveState(s => (s === 'synced' ? 'pending' : s)); }, 2000);
+    return () => clearInterval(t);
+  }, [driveOn]);
+
+  const listDriveLessons = useCallback(async () => {
+    const token = await driveTokenOrNull(true);
+    if (!token) throw new Error('구글 드라이브에 연결해 주세요.');
+    const { listLessons } = await import('./lib/driveSync');
+    return listLessons(token);
+  }, [driveTokenOrNull]);
 
   const handleLoadFromBrowser = useCallback(async () => {
     try {
@@ -631,7 +792,7 @@ export default function App() {
             toast.dismiss(id);
           }
           applyProject(p, { publish: true });
-          dirtyRef.current = true;
+          markDirty();
           toast.success('파일을 열었습니다.', added ? { description: `3D 모델 ${added}개를 이 컴퓨터의 자산함에 넣었습니다.` } : undefined);
         },
       });
@@ -733,7 +894,7 @@ export default function App() {
     else list.splice(idx + 1, 0, ...created);
     updateScenes(() => list.map((s, i) => ({ ...s, order: i })));
     setActiveSceneId(created[0].id);
-    dirtyRef.current = true;
+    markDirty();
     publishStructure(removed);
   }, [captureCurrent, updateScenes, setActiveSceneId, publishStructure]);
 
@@ -1335,7 +1496,7 @@ export default function App() {
     } else {
       updateScenes(list => list.map(s => (s.id === activeIdRef.current ? { ...s, background: bg } : s)));
     }
-    dirtyRef.current = true;
+    markDirty();
     const dark = isDarkBackground(bg);
     setColor(prev => (dark && prev === '#000000' ? '#ffffff' : !dark && prev === '#ffffff' ? '#000000' : prev));
   }, [updateScenes]);
@@ -1351,8 +1512,8 @@ export default function App() {
       {!isPresenting && (
       <TopNavBar
         projectName={projectName}
-        onRenameProject={name => { setProjectName(name); dirtyRef.current = true; }}
-        onSave={() => saveToBrowser(true)}
+        onRenameProject={name => { setProjectName(name); markDirty(); }}
+        onSave={() => { void saveToBrowser(!driveOnRef.current); if (driveOnRef.current) void saveToDrive({ manual: true }); }}
         onLoad={handleLoadFromBrowser}
         onExportFile={handleExportFile}
         onImportFile={() => projectFileInputRef.current?.click()}
@@ -1382,6 +1543,8 @@ export default function App() {
         onOpenStudentCast={() => setCastOpen(true)}
         castOn={cast.status !== 'idle'}
         castCount={cast.count}
+        driveState={driveState}
+        onOpenLessons={() => setLessonsOpen(true)}
       />
       )}
       <input
@@ -1630,6 +1793,28 @@ export default function App() {
         onToggleOrientation={() => setIsVertical(v => !v)}
       />
 
+      <DriveLessonsModal
+        isOpen={lessonsOpen}
+        onClose={() => setLessonsOpen(false)}
+        enabled={driveOn}
+        onEnable={enableDrive}
+        onDisable={disableDrive}
+        list={listDriveLessons}
+        currentFileId={lessonRef.current.fileId}
+        onOpenLesson={l => {
+          if (dirtyRef.current || driveDirtyRef.current) {
+            setConfirmState({
+              title: `'${l.name}'을(를) 열까요?`,
+              message: '지금 화면의 수업은 먼저 저장한 뒤 바뀝니다.',
+              confirmLabel: '열기',
+              onConfirm: async () => { await saveToBrowser(false); if (driveOnRef.current) await saveToDrive({}); void openDriveLesson(l); },
+            });
+          } else void openDriveLesson(l);
+        }}
+        onNewLesson={newLesson}
+        onSaveNow={() => void saveToDrive({ manual: true })}
+        status={{ off: '꺼짐', synced: '저장됨', saving: '저장하는 중…', pending: '저장 대기', 'need-auth': '다시 연결 필요', error: '저장 오류', conflict: '확인 필요' }[driveState]}
+      />
       <StudentCastModal
         isOpen={castOpen}
         onClose={() => setCastOpen(false)}
