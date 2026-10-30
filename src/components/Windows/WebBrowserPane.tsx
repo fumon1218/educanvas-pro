@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { YouTubePlayer, parseYouTube, type YouTubeHandle, type YouTubeTarget } from './YouTubePlayer';
+import { getYouTubeKey, setYouTubeKey, searchYouTube, type YouTubeResult } from '@/src/lib/youtubeSearch';
 import { ExternalLink, RotateCw, ArrowRight, Pin, Info, Scissors } from 'lucide-react';
 import { sanitizeUrl } from '@/src/lib/canvasData';
 
@@ -66,10 +67,26 @@ export function toEmbeddableUrl(raw: string, clip?: Clip): { url: string; kind: 
   return { url: safe, kind: 'web' };
 }
 
-/** 유튜브 첫 화면은 창 안에 열 수 없으므로: 새 탭에서 찾고 → 영상 주소를 붙여 넣게 돕는다 */
+/** 유튜브 영상 찾기: 검색 키가 있으면 앱 안에서 찾아 바로 재생, 없으면 새 탭에서 찾아 주소 붙여 넣기 */
 const YouTubeHelper: React.FC<{ initial: string; onPaste: (url: string) => void }> = ({ initial, onPaste }) => {
   const [q, setQ] = useState(initial);
   const [msg, setMsg] = useState<string | null>(null);
+  const [key, setKey] = useState(getYouTubeKey());
+  const [keyDraft, setKeyDraft] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [results, setResults] = useState<YouTubeResult[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const search = async (text = q) => {
+    if (!text.trim()) return;
+    if (!key) { window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(text.trim())}`, '_blank', 'noopener'); return; }
+    setBusy(true); setMsg(null);
+    try { setResults(await searchYouTube(text)); }
+    catch (e: any) { setMsg(e?.message || '찾지 못했습니다.'); if (e?.code === 'bad-key') setShowKey(true); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { if (initial && key) search(initial); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
   const pasteFromClipboard = async () => {
     try {
       const t = (await navigator.clipboard.readText()).trim();
@@ -80,22 +97,58 @@ const YouTubeHelper: React.FC<{ initial: string; onPaste: (url: string) => void 
       setMsg('붙여 넣기를 허락하지 않았습니다. 위 주소 칸에 영상 주소를 붙여 넣고(Ctrl/⌘+V) Enter를 눌러 주세요.');
     }
   };
+
   return (
-    <div className="absolute inset-0 overflow-y-auto flex flex-col items-center justify-center gap-4 p-6 text-center">
-      <div className="w-12 h-12 rounded-2xl bg-red-600 text-white flex items-center justify-center text-xl">▶</div>
-      <div>
-        <div className="text-[15px] font-bold text-slate-800">유튜브는 영상 하나씩 열 수 있어요</div>
-        <p className="mt-1 text-[12px] text-slate-500 leading-relaxed">유튜브 첫 화면·검색 화면은 유튜브가 다른 앱 안에서 열리지 못하게 막아 두었습니다.<br />새 탭에서 영상을 찾아 <b>[공유] → [복사]</b>한 뒤 돌아오면 이 창에서 바로 재생됩니다.</p>
-      </div>
-      <form
-        onSubmit={e => { e.preventDefault(); window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(q.trim())}`, '_blank', 'noopener'); }}
-        className="w-full max-w-sm flex gap-1.5"
-      >
+    <div className="absolute inset-0 overflow-y-auto flex flex-col items-center gap-3 p-5 text-center">
+      {!results && (
+        <>
+          <div className="mt-4 w-12 h-12 rounded-2xl bg-red-600 text-white flex items-center justify-center text-xl">▶</div>
+          <div>
+            <div className="text-[15px] font-bold text-slate-800">수업에 쓸 유튜브 영상 찾기</div>
+            <p className="mt-1 text-[12px] text-slate-500 leading-relaxed">
+              {key ? '찾을 말을 넣으면 수업 화면에서 바로 재생할 수 있는 영상만 보여 줍니다.' : <>유튜브 첫 화면은 다른 앱 안에서 열리지 않습니다. 새 탭에서 영상을 찾아 <b>[공유] → [복사]</b>한 뒤 아래 단추를 누르세요.</>}
+            </p>
+          </div>
+        </>
+      )}
+      <form onSubmit={e => { e.preventDefault(); search(); }} className="w-full max-w-md flex gap-1.5">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="찾을 영상 (예: 광합성 실험)" className="flex-1 min-w-0 h-10 px-3 rounded-xl bg-slate-100 text-[13px] outline-none focus:bg-white focus:ring-2 focus:ring-red-200" aria-label="유튜브에서 찾을 말" />
-        <button type="submit" className="h-10 px-3 rounded-xl bg-red-600 text-white text-[13px] font-semibold whitespace-nowrap">유튜브에서 찾기 ↗</button>
+        <button type="submit" disabled={busy} className="h-10 px-3 rounded-xl bg-red-600 text-white text-[13px] font-semibold whitespace-nowrap disabled:opacity-60">{busy ? '찾는 중…' : key ? '찾기' : '유튜브에서 찾기 ↗'}</button>
       </form>
-      <button onClick={pasteFromClipboard} className="h-10 px-4 rounded-xl bg-slate-900 text-white text-[13px] font-semibold">복사한 영상 주소 붙여 넣기</button>
-      {msg && <p className="text-[12px] text-red-500 max-w-sm" role="alert">{msg}</p>}
+      {results && (
+        results.length === 0 ? <p className="text-[13px] text-slate-500">찾은 영상이 없습니다.</p> : (
+          <div className="w-full grid grid-cols-2 md:grid-cols-3 gap-3 text-left">
+            {results.map(v => (
+              <button key={v.id} onClick={() => onPaste(`https://www.youtube.com/watch?v=${v.id}`)} className="group text-left rounded-xl overflow-hidden ring-1 ring-slate-200 bg-white hover:ring-red-300 hover:shadow-md transition">
+                <div className="relative aspect-video bg-slate-200">
+                  {v.thumb && <img src={v.thumb} alt="" className="w-full h-full object-cover" loading="lazy" />}
+                  {v.duration && <span className="absolute right-1 bottom-1 px-1 rounded bg-black/75 text-white text-[10px] font-semibold tabular-nums">{v.duration}</span>}
+                </div>
+                <div className="p-2">
+                  <div className="text-[12px] font-semibold text-slate-800 line-clamp-2 leading-snug">{v.title}</div>
+                  <div className="mt-0.5 text-[11px] text-slate-500 truncate">{v.channel}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )
+      )}
+      {!key && <button onClick={pasteFromClipboard} className="h-10 px-4 rounded-xl bg-slate-900 text-white text-[13px] font-semibold">복사한 영상 주소 붙여 넣기</button>}
+      {msg && <p className="text-[12px] text-red-500 max-w-md" role="alert">{msg}</p>}
+      <div className="mt-auto pt-2 text-[11px] text-slate-400">
+        {!showKey ? (
+          <button onClick={() => setShowKey(true)} className="underline underline-offset-2 hover:text-slate-600">{key ? '유튜브 검색 키 바꾸기' : '앱 안에서 바로 찾으려면: 유튜브 검색 키 넣기'}</button>
+        ) : (
+          <form onSubmit={e => { e.preventDefault(); setYouTubeKey(keyDraft); setKey(keyDraft.trim()); setShowKey(false); setKeyDraft(''); setMsg(null); setResults(null); }} className="flex flex-col items-center gap-1.5">
+            <span>Google Cloud의 'YouTube Data API v3' 브라우저용 API 키 (이 기기에만 보관)</span>
+            <span className="flex gap-1.5">
+              <input value={keyDraft} onChange={e => setKeyDraft(e.target.value)} placeholder="AIza…" className="w-60 h-8 px-2 rounded-lg bg-slate-100 text-[12px] font-mono" aria-label="유튜브 검색 키" autoComplete="off" />
+              <button type="submit" className="h-8 px-3 rounded-lg bg-slate-900 text-white font-semibold">저장</button>
+              {key && <button type="button" onClick={() => { setYouTubeKey(''); setKey(''); setShowKey(false); setResults(null); }} className="h-8 px-2 rounded-lg bg-slate-100 text-slate-600">지우기</button>}
+            </span>
+          </form>
+        )}
+      </div>
     </div>
   );
 };
@@ -252,6 +305,7 @@ export const WebBrowserPane: React.FC<Props> = ({ initialUrl, initialClip, onTit
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 text-center">
             <div className="text-sm font-semibold text-slate-700">수업에 쓸 웹 페이지나 영상을 여세요</div>
+            <button onClick={() => setYtSearch('')} className="flex items-center gap-2 h-11 px-5 rounded-xl bg-red-600 text-white text-[14px] font-semibold shadow-sm hover:bg-red-700">▶ 유튜브 영상 찾기</button>
             <div className="grid gap-2 w-full max-w-sm">
               {EXAMPLES.map(e => (
                 <div key={e.label} className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-left">
