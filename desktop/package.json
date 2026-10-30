@@ -20,12 +20,26 @@
     "appId": "com.okssam.board",
     "productName": "옥쌤보드",
     "artifactName": "OkssamBoard-${version}-${os}-${arch}.${ext}",
-    "directories": { "buildResources": "build", "output": "release" },
-    "files": ["main.js", "preload.js", "package.json"],
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
     "afterPack": "./adhoc-sign.js",
     "mac": {
       "category": "public.app-category.education",
-      "target": [{ "target": "dmg", "arch": ["universal"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
       "identity": null,
       "hardenedRuntime": false,
       "extendInfo": {
@@ -33,8 +47,29 @@
         "NSMicrophoneUsageDescription": "수업 녹화에 마이크를 씁니다."
       }
     },
-    "dmg": { "title": "옥쌤보드" },
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "shortcutName": "옥쌤보드" }
-  }
+    "dmg": {
+      "title": "옥쌤보드"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "옥쌤보드"
+    },
+    "publish": null
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fumon1218/educanvas-pro.git"
+  },
+  "homepage": "https://fumon1218.github.io/educanvas-pro/"
 }
