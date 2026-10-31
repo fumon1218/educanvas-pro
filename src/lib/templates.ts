@@ -249,7 +249,7 @@ export async function appendPaper(canvas: fabric.Canvas): Promise<number | null>
 // 성경 구절
 // ---------------------------------------------------------------------------
 
-const BOOKS: [string, string[], string][] = [
+export const BOOKS: [string, string[], string][] = [
   ['창세기', ['창', '창세기'], 'gen'], ['출애굽기', ['출', '출애굽기'], 'exo'], ['레위기', ['레', '레위기'], 'lev'], ['민수기', ['민', '민수기'], 'num'], ['신명기', ['신', '신명기'], 'deu'],
   ['여호수아', ['수', '여호수아'], 'jos'], ['사사기', ['삿', '사사기'], 'jdg'], ['룻기', ['룻', '룻기'], 'rut'], ['사무엘상', ['삼상', '사무엘상'], '1sa'], ['사무엘하', ['삼하', '사무엘하'], '2sa'],
   ['열왕기상', ['왕상', '열왕기상'], '1ki'], ['열왕기하', ['왕하', '열왕기하'], '2ki'], ['역대상', ['대상', '역대상'], '1ch'], ['역대하', ['대하', '역대하'], '2ch'], ['에스라', ['스', '에스라'], 'ezr'],
@@ -267,7 +267,7 @@ const BOOKS: [string, string[], string][] = [
 ];
 
 /** '롬 8:28-30', '로마서 8장 28절' → { book: '로마서', code: 'rom', chap: 8, ref: '로마서 8:28-30' } */
-export function parseBibleRef(input: string): { book: string; code: string; chap: number; ref: string } | null {
+export function parseBibleRef(input: string): { book: string; code: string; chap: number; ref: string; bookNo: number; from?: number; to?: number } | null {
   const s = input.trim().replace(/\s+/g, ' ');
   const m = s.match(/^([1-3]?\s?[가-힣]+)\s*(\d+)\s*(?:장|:)?\s*(\d+)?\s*(?:절)?\s*(?:[-~]\s*(\d+)\s*(?:절)?)?$/);
   if (!m) return null;
@@ -276,7 +276,7 @@ export function parseBibleRef(input: string): { book: string; code: string; chap
   if (!hit) return null;
   const chap = Number(m[2]);
   const ref = `${hit[0]} ${chap}${m[3] ? `:${m[3]}${m[4] ? `-${m[4]}` : ''}` : '장'}`;
-  return { book: hit[0], code: hit[2], chap, ref };
+  return { book: hit[0], code: hit[2], chap, ref, bookNo: BOOKS.indexOf(hit) + 1, from: m[3] ? Number(m[3]) : undefined, to: m[4] ? Number(m[4]) : undefined };
 }
 
 /** 대한성서공회 성경 읽기 페이지 (개역개정) */

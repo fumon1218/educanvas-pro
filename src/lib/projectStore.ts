@@ -122,6 +122,7 @@ export function textOfScene(data: string | null | undefined): string[] {
   const walk = (objs: any[]) => objs?.forEach(o => {
     if (!o) return;
     if (typeof o.text === 'string' && !o.isPlaceholder && o.text.trim()) out.push(o.text.trim());
+    else if (typeof o.bibleText === 'string') out.push(o.bibleText.trim());
     if (Array.isArray(o.objects)) walk(o.objects);
   });
   try { walk(JSON.parse(data).objects || []); } catch { /* 무시 */ }
