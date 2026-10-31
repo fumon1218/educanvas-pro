@@ -1,7 +1,7 @@
 /**
  * 노트 양식 (공간별)
  *  수업: 빈 슬라이드 · 줄 공책 · 모눈 공책
- *  학생: 코넬 공부 노트 · 줄 공책 (+ 오답 노트)
+ *  학생: 스터디 플래너 · 코넬 공부 노트 · 줄 공책 (+ 오답 노트)
  *  설교: 설교 노트 (날짜·설교자·본문·제목 / 대지 1·2·3 / 적용 / 기도 제목)
  *  업무: 회의록 (일시·장소·참석자·안건 / 논의 / 결정 사항 / 할 일) · 업무 일지
  *
@@ -12,7 +12,7 @@ import * as fabric from 'fabric';
 import { serializeCanvas } from './canvasData';
 import type { Space } from './projectStore';
 
-export type PaperStyle = 'lined' | 'grid' | 'blank' | 'cornell' | 'sermon' | 'meeting' | 'worklog';
+export type PaperStyle = 'lined' | 'grid' | 'blank' | 'cornell' | 'sermon' | 'meeting' | 'worklog' | 'planner';
 export interface TemplateDef { id: string; space: Space; label: string; desc: string; paper?: PaperStyle; name: (d: Date) => string }
 
 const md = (d: Date) => `${d.getMonth() + 1}월 ${d.getDate()}일`;
@@ -20,6 +20,7 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'blank', space: 'lesson', label: '빈 슬라이드', desc: '지금까지처럼 무한 캔버스 슬라이드', name: () => '새 수업' },
   { id: 'lined', space: 'lesson', label: '줄 공책', desc: '세로로 이어지는 줄 공책 · 판서 노트', paper: 'lined', name: d => `판서 노트 · ${md(d)}` },
   { id: 'grid', space: 'lesson', label: '모눈 공책', desc: '수학·도형 풀이용', paper: 'grid', name: d => `모눈 노트 · ${md(d)}` },
+  { id: 'planner', space: 'student', label: '스터디 플래너', desc: '날짜·D-day·목표, 할 일 체크, 10분 타임테이블, 총 공부 시간', paper: 'planner', name: d => `스터디 플래너 · ${md(d)}` },
   { id: 'cornell', space: 'student', label: '코넬 공부 노트', desc: '왼쪽 키워드·질문, 오른쪽 필기, 아래 요약', paper: 'cornell', name: d => `공부 노트 · ${md(d)}` },
   { id: 'lined', space: 'student', label: '줄 공책', desc: '자유롭게 쓰는 공책', paper: 'lined', name: d => `공책 · ${md(d)}` },
   { id: 'sermon', space: 'sermon', label: '설교 노트', desc: '날짜·설교자·예배·본문·제목 칸 + 자유롭게 쓰는 줄 공간', paper: 'sermon', name: d => `설교 노트 · ${md(d)}` },
@@ -133,6 +134,50 @@ function layoutOf(style: PaperStyle, first: boolean): Layout {
         ],
       };
     }
+    case 'planner': {
+      // 한 쪽 = 하루. [+ 쪽]을 누르면 다음 날 쪽이 같은 모양으로 붙는다
+      const y0 = 70, colR = M + W * 0.5 + 16, tTop = 340, HOURS = 19, rowH = 64; // 6시 ~ 24시
+      const tW = PAPER_W - M - colR, hourW = 64, cellW = (tW - hourW) / 6;
+      const tBottom = tTop + 44 + HOURS * rowH;
+      const leftR = M + W * 0.5 - 16;
+      return {
+        draw: c => {
+          label(c, '스터디 플래너', M, y0 - 6, 40, '#1e293b');
+          headerRow(c, y0 + 60, [{ t: '날짜', w: 0.6 }, { t: 'D-day', w: 0.4 }]);
+          headerRow(c, y0 + 134, [{ t: '목표', w: 1 }]);
+          // 왼쪽: 할 일
+          c.fillStyle = '#4f46e5'; c.fillRect(M, tTop, 8, 34);
+          label(c, '오늘 할 일 · 과목', M + 22, tTop + 2, 28, '#1e293b');
+          ruled(c, M, tTop + 44, leftR, 1270, 56);
+          // 왼쪽 아래: 총 공부 시간, 한 줄 평가
+          box(c, M, 1300, leftR - M, 110);
+          label(c, '총 공부 시간', M + 20, 1320, 24, '#64748b');
+          c.fillStyle = '#64748b'; c.font = `bold 34px ${KFONT}`; c.textBaseline = 'top';
+          c.fillText('시간          분', leftR - 290, 1350);
+          box(c, M, 1430, leftR - M, tBottom - 1430);
+          label(c, '오늘의 한 줄 (잘한 점 · 아쉬운 점)', M + 20, 1446, 22, '#94a3b8');
+          ruled(c, M + 10, 1470, leftR - 10, tBottom - 10, 56);
+          // 오른쪽: 10분 타임테이블
+          label(c, '타임테이블 (10분 칸에 색칠)', colR, tTop + 4, 24, '#64748b');
+          const gy = tTop + 44;
+          c.fillStyle = '#f8fafc'; c.fillRect(colR, gy, hourW, HOURS * rowH);
+          for (let h = 0; h < HOURS; h++) {
+            const hr = (6 + h) % 24 || 24;
+            label(c, String(hr === 24 ? 24 : hr), colR + 14, gy + h * rowH + rowH / 2 - 13, 24, hr >= 12 && hr < 18 ? '#475569' : '#64748b');
+          }
+          for (let h = 0; h <= HOURS; h++) line(c, colR, gy + h * rowH, PAPER_W - M, gy + h * rowH, '#cbd5e1', 2);
+          for (let k = 0; k <= 6; k++) line(c, colR + hourW + cellW * k, gy, colR + hourW + cellW * k, gy + HOURS * rowH, k === 3 ? '#cbd5e1' : '#e2e8f0', k === 3 ? 2 : 1.5);
+          line(c, colR, gy, colR, gy + HOURS * rowH, '#cbd5e1', 2);
+          line(c, PAPER_W - M, gy, PAPER_W - M, gy + HOURS * rowH, '#cbd5e1', 2);
+        },
+        fields: [
+          ...headerFields(y0 + 60, [{ t: '날짜', w: 0.6, key: 'date', ph: '' }, { t: 'D-day', w: 0.4, key: 'dday', ph: '' }]),
+          ...headerFields(y0 + 134, [{ t: '목표', w: 1, key: 'goal', ph: '' }]),
+          { key: 'todo', x: M + 10, y: tTop + 54, w: leftR - M - 20, h: 860, ph: '', checklist: 'todo' },
+          { key: 'total', label: '총 공부 시간', x: M + 20, y: 1352, w: 200, h: 44, ph: '' },
+        ],
+      };
+    }
     case 'worklog': {
       if (!first) return layoutOf('lined', false);
       const y0 = 80;
@@ -204,7 +249,8 @@ async function addPaper(sc: fabric.StaticCanvas | fabric.Canvas, style: PaperSty
       continue;
     }
     // 칸은 비워 둔다 (날짜만 오늘로). 펜으로 쓰거나, 선택 도구로 칸을 두 번 눌러 타자로 적는다
-    const isDate = f.key === 'date' && style !== 'sermon'; // 설교 노트는 날짜도 비워 둔다 (자유롭게 쓰기)
+    // 설교 노트는 날짜도 비워 둔다 (자유롭게 쓰기). 플래너의 다음 쪽은 다른 날이므로 비워 둔다
+    const isDate = f.key === 'date' && style !== 'sermon' && (first || style !== 'planner');
     const t = new fabric.Textbox(isDate ? todayText(date) : '', {
       left: left + f.x * k, top: top + f.y * k, width: f.w * k, originX: 'left', originY: 'top', fontSize: fs,
       fill: '#0f172a', fontFamily: KFONT,
