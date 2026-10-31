@@ -749,7 +749,7 @@ export default function App() {
     if (data) { markDirty(); setTimeout(() => { whiteboardRef.current?.goToPageNo(1); }, 400); }
     setLessonsOpen(false);
     toast.success(t?.paper ? `'${name}'을(를) 만들었습니다.` : '새 수업을 시작했습니다.', {
-      description: t?.paper ? '회색 칸을 눌러 타자로 적거나 펜으로 쓰세요. 쪽이 모자라면 노트 → [공책 쪽 추가].' : `${opts.category ? `'${opts.category}' 분류 · ` : ''}판서를 시작하면 [내 노트]에 자동으로 저장됩니다.`,
+      description: t?.paper ? '칸에 펜으로 바로 쓰거나, 선택 도구로 칸을 두 번 눌러 타자로 적으세요. 쪽이 모자라면 노트 → [공책 쪽 추가].' : `${opts.category ? `'${opts.category}' 분류 · ` : ''}판서를 시작하면 [내 노트]에 자동으로 저장됩니다.`,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveToDrive, applyProject]);
