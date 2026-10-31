@@ -49,7 +49,7 @@
       }
     },
     "dmg": {
-      "title": "옥쌤보드"
+      "title": "OkssamBoard ${version} ${arch}"
     },
     "win": {
       "target": [
