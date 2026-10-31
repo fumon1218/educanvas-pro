@@ -43,11 +43,29 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+const PREV_KEY = 'previous';
+
+/** 수업 번호가 없던 예전 저장본은 저장 시각으로 같은 수업인지 알아본다 */
+export const legacyLessonId = (p: { savedAt?: string }) => 'legacy-' + (p.savedAt || '');
+
+const hasContent = (p: StoredProject | null | undefined) =>
+  !!p?.scenes?.some(s => { try { return !!s.data && JSON.parse(s.data).objects?.length > 0; } catch { return false; } });
+
+/**
+ * 이 브라우저에 저장. 다른 수업을 저장하려고 하면, 원래 있던 수업은 '직전 수업'으로 한 칸 보관한다
+ * (이전 수업을 이어서 하지 않고 새로 시작해도 예전 수업이 사라지지 않게).
+ */
 export async function saveProject(project: StoredProject): Promise<void> {
   const db = await openDB();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(project, KEY);
+    const store = tx.objectStore(STORE);
+    const cur = store.get(KEY);
+    cur.onsuccess = () => {
+      const old = cur.result as StoredProject | undefined;
+      if (old && hasContent(old) && (old.lessonId || legacyLessonId(old)) !== project.lessonId) store.put(old, PREV_KEY);
+      store.put(project, KEY);
+    };
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
@@ -55,11 +73,12 @@ export async function saveProject(project: StoredProject): Promise<void> {
   db.close();
 }
 
-export async function loadProject(): Promise<StoredProject | null> {
+/** which='previous': 다른 수업에 덮여 한 칸 보관된 직전 수업 */
+export async function loadProject(which: 'current' | 'previous' = 'current'): Promise<StoredProject | null> {
   const db = await openDB();
   const result = await new Promise<StoredProject | null>((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(KEY);
+    const req = tx.objectStore(STORE).get(which === 'previous' ? PREV_KEY : KEY);
     req.onsuccess = () => resolve((req.result as StoredProject) || null);
     req.onerror = () => reject(req.error);
   });

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown, Users, Share, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Sparkles, ArrowRight,
   Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer, Play, Cloud, CloudOff, Eraser, Paintbrush, MonitorSmartphone,
+  History,
 } from 'lucide-react';
 import { glass } from './BottomNavBar';
 import { cn } from '@/src/lib/utils';
@@ -16,6 +17,7 @@ interface TopNavBarProps {
   onRenameProject: (name: string) => void;
   onSave: () => void;
   onLoad: () => void;
+  onLoadPrevious?: () => void;
   onExportFile: () => void;
   onImportFile: () => void;
   onExportPDF: () => void;
@@ -67,7 +69,7 @@ const MenuItem: React.FC<{ icon: React.ElementType; label: string; hint?: string
 );
 
 export const TopNavBar: React.FC<TopNavBarProps> = ({
-  projectName, onRenameProject, onSave, onLoad, onExportFile, onImportFile, onExportPDF, onExportCurrentPDF,
+  projectName, onRenameProject, onSave, onLoad, onLoadPrevious, onExportFile, onImportFile, onExportPDF, onExportCurrentPDF,
   onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
   isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
   onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false, saveState = 'saved',
@@ -164,6 +166,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
                 <MenuItem icon={Save} label="저장" hint="Ctrl+S" onClick={run(onSave)} />
                 <MenuItem icon={Cloud} label="내 수업 (구글 드라이브)" hint="모든 기기" onClick={run(onOpenLessons)} />
                 <MenuItem icon={FolderOpen} label="이 브라우저에 저장한 수업" onClick={run(onLoad)} />
+                {onLoadPrevious && <MenuItem icon={History} label="직전 수업 되살리기" hint="덮어쓴 수업" onClick={run(onLoadPrevious)} />}
                 <div className="h-px bg-slate-100 my-1" />
                 <MenuItem icon={Download} label="파일로 내보내기 (.json)" onClick={run(onExportFile)} />
                 <MenuItem icon={Upload} label="파일 열기" onClick={run(onImportFile)} />
