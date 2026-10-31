@@ -115,7 +115,7 @@ export interface WhiteboardHandle {
   addChecklist: (kind: 'todo' | 'prayer') => void;
   /** 성경 구절 카드 넣기 */
   /** 성경 구절 카드: image가 있으면 읽는 법을 단 그림 카드(두 번 누르면 text로 바뀜), 없으면 글 상자 */
-  addBibleCard: (card: { ref: string; text: string; image?: { url: string; w: number; h: number } }) => Promise<void>;
+  addBibleCard: (card: { ref: string; text: string; bg?: string; image?: { url: string; w: number; h: number } }) => Promise<void>;
   /** 체크 목록의 한 줄 체크/해제 */
   setChecklistLine: (objId: string, line: number, checked: boolean) => boolean;
   getLaserCanvas: () => HTMLCanvasElement | null;
@@ -159,13 +159,19 @@ const TEXT_TYPES = new Set(['i-text', 'text', 'textbox']);
 const HISTORY_LIMIT = 50;
 const KOREAN_FONT = "'Pretendard', 'Noto Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif";
 
-/** 성경 구절 글 상자 (첫 줄은 굵은 머리) */
-function makeBibleTextbox(text: string, left: number, top: number, width: number) {
-  const headLen = text.split('\n')[0].length;
+/** 성경 구절 글 상자: 첫 줄(구절·번역본)과 [번역본] 줄은 작게 */
+const BIBLE_BG: Record<string, string> = { yellow: '#fef3c7', white: '#ffffff', none: '' };
+function makeBibleTextbox(text: string, left: number, top: number, width: number, bg = 'yellow') {
+  const styles: Record<number, Record<number, any>> = {};
+  text.split('\n').forEach((line, i) => {
+    const head = i === 0, label = /^\[[^\]]+\]$/.test(line);
+    if (!head && !label) return;
+    styles[i] = Object.fromEntries(Array.from({ length: line.length }, (_, k) => [k, { fontWeight: 'bold', fill: head ? '#92400e' : '#b45309', fontSize: head ? 15 : 12 }]));
+  });
   return new fabric.Textbox(text, {
     left, top, width, originX: 'left', originY: 'top', fontSize: 22, lineHeight: 1.4,
-    fill: '#1e293b', fontFamily: KOREAN_FONT + ", 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic'", backgroundColor: '#fef3c7', padding: 14,
-    styles: { 0: Object.fromEntries(Array.from({ length: headLen }, (_, i) => [i, { fontWeight: 'bold', fill: '#92400e' }])) } as any,
+    fill: '#1e293b', fontFamily: KOREAN_FONT + ", 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic'", backgroundColor: BIBLE_BG[bg] ?? BIBLE_BG.yellow, padding: 14,
+    styles: styles as any,
   });
 }
 
@@ -1038,9 +1044,9 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         obj = img;
       } else {
         const w = Math.min(600, (canvas.width / z) * 0.7);
-        obj = makeBibleTextbox(card.text, c.x - w / 2, c.y - 60, w);
+        obj = makeBibleTextbox(card.text, c.x - w / 2, c.y - 60, w, card.bg);
       }
-      Object.assign(obj as any, { id: newId(), bibleRef: card.ref, bibleText: card.text });
+      Object.assign(obj as any, { id: newId(), bibleRef: card.ref, bibleText: card.text, bibleBg: card.bg || 'yellow' });
       canvas.add(obj);
       canvas.setActiveObject(obj);
       canvas.requestRenderAll();
@@ -1320,8 +1326,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       // 읽는 법을 단 성경 카드 → 고칠 수 있는 글(괄호 방식)로
       const bt: any = opt.target;
       if (bt && bt.type === 'image' && bt.bibleText && !bt.locked) {
-        const t = makeBibleTextbox(bt.bibleText, bt.left, bt.top, bt.getScaledWidth());
-        Object.assign(t as any, { id: newId(), bibleRef: bt.bibleRef, bibleText: bt.bibleText });
+        const t = makeBibleTextbox(bt.bibleText, bt.left, bt.top, bt.getScaledWidth(), bt.bibleBg);
+        Object.assign(t as any, { id: newId(), bibleRef: bt.bibleRef, bibleText: bt.bibleText, bibleBg: bt.bibleBg });
         const idx = canvas.getObjects().indexOf(bt);
         canvas.remove(bt);
         canvas.insertAt(idx, t);

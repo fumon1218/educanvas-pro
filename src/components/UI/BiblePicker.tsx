@@ -5,7 +5,7 @@ import { cn } from '@/src/lib/utils';
 import { BOOKS, parseBibleRef } from '@/src/lib/templates';
 import {
   BIBLE_VERSIONS, getBiblePref, getPassage, isDownloaded, partsToText, refLabel, setBiblePref, versionById,
-  type BiblePref, type Passage, type VerseRange,
+  type BiblePref, type CardBg, type Passage, type VerseRange,
 } from '@/src/lib/bibleText';
 import { passagesToText, renderRubyCard } from '@/src/lib/bibleCard';
 
@@ -13,7 +13,7 @@ import { passagesToText, renderRubyCard } from '@/src/lib/bibleCard';
  * 성경 구절 고르기: 구절을 적거나 책·장을 고르고, 절을 눌러 범위를 정한 뒤 [넣기].
  *   const card = await pickBible('롬 8:28');
  */
-export interface BibleCardPayload { ref: string; text: string; image?: { url: string; w: number; h: number } }
+export interface BibleCardPayload { ref: string; text: string; bg: CardBg; image?: { url: string; w: number; h: number } }
 type Req = { initial?: string; resolve: (v: BibleCardPayload | null) => void };
 let push: ((r: Req) => void) | null = null;
 export const pickBible = (initial?: string) => new Promise<BibleCardPayload | null>(resolve => {
@@ -99,10 +99,10 @@ export const BibleHost: React.FC = () => {
       const ps = (await Promise.all(versions.map(v => getPassage(v, use)))).filter(p => p.verses.length);
       if (!ps.length) { setErr('그 구절이 없습니다. 장·절 번호를 확인해 주세요.'); return; }
       const ref = refLabel(BOOKS[use.bookNo - 1][0], use);
-      const opts = { ruby: pref.ruby, numbers: pref.numbers };
+      const opts = { ruby: pref.ruby, numbers: pref.numbers, bg: pref.bg };
       const text = passagesToText(ref, ps, opts);
       const image = pref.ruby === 'over' && ps.some(p => p.version.ruby) ? await renderRubyCard(ref, ps, opts) : undefined;
-      done({ ref, text, image });
+      done({ ref, text, image, bg: pref.bg });
     } catch {
       setErr('본문을 받지 못했습니다. 인터넷 연결을 확인해 주세요.');
     } finally { setBusy(false); }
@@ -174,6 +174,15 @@ export const BibleHost: React.FC = () => {
                 <label className="flex items-center gap-1.5 cursor-pointer">
                   <input type="checkbox" checked={pref.numbers} onChange={e => savePref({ ...pref, numbers: e.target.checked })} /> 절 번호
                 </label>
+                <span className="flex items-center gap-1.5">
+                  바탕
+                  {([['yellow', '노랑', 'bg-amber-100'], ['white', '흰색', 'bg-white'], ['none', '투명', 'bg-[conic-gradient(#e2e8f0_25%,#fff_0_50%,#e2e8f0_0_75%,#fff_0)] bg-[length:8px_8px]']] as const).map(([k, l, sw]) => (
+                    <button key={k} type="button" onClick={() => savePref({ ...pref, bg: k as CardBg })} aria-pressed={pref.bg === k}
+                      className={cn('h-7 pl-1.5 pr-2.5 rounded-lg ring-1 flex items-center gap-1.5', pref.bg === k ? 'ring-2 ring-slate-800 font-semibold' : 'ring-slate-200 hover:bg-slate-50')}>
+                      <span className={cn('w-4 h-4 rounded ring-1 ring-slate-300', sw)} />{l}
+                    </button>
+                  ))}
+                </span>
               </div>
               {hasRuby && (
                 <p className="text-[12px] text-slate-500 -mt-1">
