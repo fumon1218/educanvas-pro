@@ -1,10 +1,11 @@
 import { DOC_ACCEPT } from '@/src/lib/docImport';
+import { askText } from './PromptHost';
 import React, { useState } from 'react';
 import {
   Pencil, Pen, Feather, Minus, Eraser, Zap, MousePointer2, Circle, Square, Triangle as TriangleIcon, Shapes, Type,
   PaintBucket, Highlighter, Upload, Link, Undo2, Redo2, Hand, Pipette, Scissors, Copy, ClipboardPaste,
   Lasso, Slash, MoveRight, Pentagon, Globe, Box, Music, ImagePlus, MoreHorizontal, Palette, ZoomIn,
-  BookmarkPlus, SquareDashed, Layers, BarChart3, GraduationCap,
+  BookmarkPlus, SquareDashed, Layers, BarChart3, GraduationCap, NotebookPen, ListChecks, HeartHandshake, BookOpen, FilePlus2,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -41,6 +42,10 @@ interface ToolbarProps {
   onOpenStudy?: () => void;
   /** 학생 모드: 공부 도구를 앞에 */
   studentMode?: boolean;
+  /** 노트 도구: 할 일·기도 제목 목록, 성경 구절, 공책 쪽 추가 */
+  onNoteTool?: (kind: 'todo' | 'prayer' | 'bible' | 'page') => void;
+  /** 휴대폰: 아래쪽 가로 막대, 옆으로 밀어 보기 */
+  isPhone?: boolean;
 }
 
 const QUICK_COLORS = [
@@ -62,7 +67,7 @@ const PEN_TOOLS: ToolType[] = ['pen', 'pencil', 'fountain', 'ballpoint', 'dashed
 export const Toolbar: React.FC<ToolbarProps> = ({
   activeTool, onToolSelect, onAddShape, onAddText, color, onColorChange, brushSize, onBrushSizeChange,
   isVertical, onAddFile, onAddWebLink, onUndo, onRedo, onCopy, onPaste, onCut, onOpenWebWindow, onOpenAssets,
-  onStartReview, onOpenStudy, studentMode,
+  onStartReview, onOpenStudy, studentMode, onNoteTool, isPhone = false,
 }) => {
   const [menu, setMenu] = useState<string | null>(null);
   const [recentColors, setRecentColors] = useState<string[]>([]);
@@ -88,8 +93,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     }
   };
 
-  const handleWebLinkPrompt = () => {
-    const input = window.prompt('웹 주소를 입력하세요 (예: www.youtube.com)');
+  const handleWebLinkPrompt = async () => {
+    const input = await askText({ title: '웹 링크 카드', placeholder: '예: www.youtube.com', confirmLabel: '넣기' });
     if (input == null) return;
     const url = sanitizeUrl(input);
     if (!url) {
@@ -133,6 +138,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         { id: 'weblink', icon: Link, label: '웹 링크 카드', action: handleWebLinkPrompt },
       ],
     },
+    note: {
+      title: '노트',
+      items: [
+        { id: 'n-todo', icon: ListChecks, label: '할 일 목록', hint: '☐를 누르면 체크 · @담당 ~기한', action: () => onNoteTool?.('todo') },
+        { id: 'n-prayer', icon: HeartHandshake, label: '기도 제목', hint: '설교 공간에서 모아 보기', action: () => onNoteTool?.('prayer') },
+        { id: 'n-bible', icon: BookOpen, label: '성경 구절 카드', hint: '예: 롬 8:28', action: () => onNoteTool?.('bible') },
+        { id: 'n-page', icon: FilePlus2, label: '공책 쪽 추가', hint: '줄 공책·양식 노트 아래에 한 쪽 더', action: () => onNoteTool?.('page') },
+      ],
+    },
     study: {
       title: '공부 도구',
       items: [
@@ -170,7 +184,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       aria-pressed={active}
       className={cn(
         'group shrink-0 flex items-center rounded-xl transition-all',
-        isVertical ? 'w-full gap-2.5 h-10 px-2.5 justify-center lg:justify-start' : 'w-11 h-11 justify-center',
+        isVertical ? 'w-full gap-2.5 h-10 px-2.5 justify-center lg:justify-start' : isPhone ? 'w-10 h-10 justify-center' : 'w-11 h-11 justify-center',
         active ? 'bg-indigo-600 text-white shadow-[0_6px_14px_-4px_rgba(79,70,229,0.55)]' : 'text-slate-600 hover:bg-slate-900/[0.05]',
       )}
     >
@@ -184,7 +198,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const penActive = PEN_TOOLS.includes(activeTool);
 
   return (
-    <div className={cn('absolute z-40 pointer-events-none', isVertical ? 'left-4 top-[88px] bottom-[108px] flex flex-col' : 'bottom-[96px] left-1/2 -translate-x-1/2')}>
+    <div className={cn('absolute z-40 pointer-events-none', isVertical ? 'left-4 top-[88px] bottom-[108px] flex flex-col' : isPhone ? 'bottom-[64px] left-2 right-2 flex justify-center' : 'bottom-[96px] left-1/2 -translate-x-1/2')}>
       <input
         type="file"
         ref={fileInputRef}
@@ -197,7 +211,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         }}
       />
 
-      <div className={cn('pointer-events-auto rounded-2xl', glass, isVertical ? 'w-[60px] lg:w-[132px] p-1.5 lg:p-2 flex flex-col gap-0.5 max-h-full overflow-y-auto scrollbar-hide' : 'flex items-center gap-0.5 p-1.5')}>
+      <div className={cn('pointer-events-auto rounded-2xl', glass, isVertical ? 'w-[60px] lg:w-[132px] p-1.5 lg:p-2 flex flex-col gap-0.5 max-h-full overflow-y-auto scrollbar-hide' : isPhone ? 'flex items-center gap-0 p-1 max-w-full overflow-x-auto scrollbar-hide' : 'flex items-center gap-0.5 p-1.5')}>
         <Row icon={MousePointer2} label="선택" active={activeTool === 'select'} onClick={() => { onToolSelect('select'); setMenu(null); }} />
         <Row icon={Hand} label="손" title="손 (화면 이동 · 스페이스바를 누른 채 끌어도 됩니다)" active={activeTool === 'pan'} onClick={() => { onToolSelect('pan'); setMenu(null); }} />
         <Row icon={Pencil} label="펜" caret active={penActive} onClick={() => { if (!penActive) onToolSelect('pen'); toggle('pen'); }} />
@@ -207,6 +221,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <Row icon={Type} label="글자" onClick={() => { onAddText(); setMenu(null); }} />
         <Row icon={Zap} label="레이저" active={activeTool === 'laser'} onClick={() => { onToolSelect('laser'); setMenu(null); }} />
         <Row icon={ImagePlus} label="자료 넣기" caret active={menu === 'media'} onClick={() => toggle('media')} />
+        <Row icon={NotebookPen} label="노트" caret active={menu === 'note'} onClick={() => toggle('note')} />
         <Row icon={GraduationCap} label={studentMode ? '공부 도구' : '공부·복습'} caret active={menu === 'study' || ['clip', 'flashcard'].includes(activeTool)} onClick={() => toggle('study')} />
         <Row icon={MoreHorizontal} label="더 보기" caret active={menu === 'more' || ['lasso', 'bucket', 'eyedropper', 'magnify'].includes(activeTool)} onClick={() => toggle('more')} />
 
@@ -268,7 +283,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             exit={{ opacity: 0, x: isVertical ? -6 : 0, y: isVertical ? 0 : 6 }}
             className={cn(
               'absolute z-50 p-2 rounded-2xl pointer-events-auto bg-white/95 backdrop-blur-xl ring-1 ring-slate-900/[0.07] shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] w-[230px]',
-              isVertical ? 'left-[72px] lg:left-[144px] top-24' : 'bottom-full mb-3 left-1/2 -translate-x-1/2',
+              isVertical ? 'left-[72px] lg:left-[144px] top-24' : isPhone ? 'bottom-full mb-2 left-1/2 -translate-x-1/2 max-h-[55vh] overflow-y-auto' : 'bottom-full mb-3 left-1/2 -translate-x-1/2',
             )}
           >
             <div className="px-2.5 pt-1 pb-1.5 text-[11px] font-semibold text-slate-400">{menus[menu].title}</div>

@@ -18,6 +18,9 @@ import { SlideNavigator } from './components/UI/SlideNavigator';
 import { FloatingCamera } from './components/UI/FloatingCamera';
 import { LessonHistoryModal } from './components/UI/LessonHistoryModal';
 import { LessonDashboard } from './components/UI/LessonDashboard';
+import { PromptHost, askText } from './components/UI/PromptHost';
+import { buildTemplateScene, parseBibleRef, bibleUrl, type TemplateDef } from './lib/templates';
+import { checkItemsOf, setCheckInData, type CheckItem } from './lib/noteOps';
 import { ClipSaveModal, StudyLogModal, FocusChip, FlashReviewBar, type FocusState } from './components/Study/StudyTools';
 import { WRONG_NOTE_ID, createClipScene, addToWrongNote, addStudyMinute, addFocusSession, nextDue, initialStudentMode, saveStudentMode } from './lib/study';
 import { PdfImportModal, type PdfImportMode } from './components/UI/PdfImportModal';
@@ -58,7 +61,7 @@ import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { newId, normalizeSceneData, renderSceneImage, createImageScene, createScoreScene, createStackedPdfScene } from './lib/canvasData';
-import { saveProject, loadProject, loadLesson, setLastLesson, restoreHistory, legacyLessonId, type HistoryEntry, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
+import { saveProject, loadProject, loadLesson, loadLessonRaw, isLockedLesson, openWithCachedKey, unlockLesson, lockLesson, removeLock, isUnlocked, listLibrary, spaceOf, type Space, setLastLesson, restoreHistory, legacyLessonId, type HistoryEntry, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
 import { formatBytes } from './lib/assetStore';
 
 interface Scene {
@@ -82,7 +85,16 @@ export default function App() {
   const [color, setColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(5);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [isVertical, setIsVertical] = useState(true);
+  const [isVerticalPref, setIsVertical] = useState(true);
+  // 휴대폰(폭 640px 미만): 도구 막대는 아래 가로, 상단 단추는 [⋯] 메뉴
+  const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const on = () => setIsPhone(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const isVertical = isVerticalPref && !isPhone;
   const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>('blank');
   const canvasBgRef = useRef(canvasBackground);
 
@@ -141,7 +153,7 @@ export default function App() {
   const driveDirtyRef = useRef(false);
   const markDirty = useCallback(() => { dirtyRef.current = true; driveDirtyRef.current = true; }, []);
   // 수업 고유 번호와 드라이브 파일
-  const lessonRef = useRef<{ lessonId: string; fileId: string | null; modified: string | null; category?: string }>({ lessonId: newId() + newId(), fileId: null, modified: null });
+  const lessonRef = useRef<{ lessonId: string; fileId: string | null; modified: string | null; category?: string; space?: Space; noteDate?: string }>({ lessonId: newId() + newId(), fileId: null, modified: null });
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'error'>('saved');
   const saveErrorRef = useRef(false);
 
@@ -567,6 +579,8 @@ export default function App() {
       scenes: scenesRef.current.map(({ id, name, data, thumbnail, background }) => ({ id, name, data, thumbnail, ...(background ? { background } : {}) })),
       lessonId: lessonRef.current.lessonId,
       ...(lessonRef.current.category ? { category: lessonRef.current.category } : {}),
+      ...(lessonRef.current.space ? { space: lessonRef.current.space } : {}),
+      ...(lessonRef.current.noteDate ? { noteDate: lessonRef.current.noteDate } : {}),
       ...(lessonRef.current.fileId ? { driveFileId: lessonRef.current.fileId } : {}),
       ...(lessonRef.current.modified ? { driveModified: lessonRef.current.modified } : {}),
     };
@@ -577,7 +591,7 @@ export default function App() {
       await saveProject(buildProject());
       dirtyRef.current = false;
       saveErrorRef.current = false;
-      if (manual) toast.success(`'${projectName}' 수업을 저장했습니다.`, { description: driveOnRef.current ? '이 컴퓨터와 구글 드라이브에 저장됩니다. [내 수업]에서 언제든 엽니다.' : '이 컴퓨터(이 브라우저)에 저장되었습니다. 왼쪽 위 [내 수업]에서 언제든 엽니다.' });
+      if (manual) toast.success(`'${projectName}' 수업을 저장했습니다.`, { description: driveOnRef.current ? '이 컴퓨터와 구글 드라이브에 저장됩니다. [내 노트]에서 언제든 엽니다.' : '이 컴퓨터(이 브라우저)에 저장되었습니다. 왼쪽 위 [내 노트]에서 언제든 엽니다.' });
     } catch (err) {
       console.error('저장 실패', err);
       saveErrorRef.current = true;
@@ -590,7 +604,7 @@ export default function App() {
     const list: Scene[] = p.scenes.map((s, i) => ({ id: s.id, name: s.name, data: normalizeSceneData(s.data), thumbnail: s.thumbnail, order: i, ...(isBackgroundId(s.background) ? { background: s.background } : {}) }));
     const removed = scenesRef.current.filter(s => !list.some(n => n.id === s.id)).map(s => s.id);
     setProjectName(p.name || '수업');
-    lessonRef.current = { lessonId: p.lessonId || legacyLessonId(p), fileId: p.driveFileId || null, modified: p.driveModified || null, category: p.category };
+    lessonRef.current = { lessonId: p.lessonId || legacyLessonId(p), fileId: p.driveFileId || null, modified: p.driveModified || null, category: p.category, space: p.space, noteDate: p.noteDate };
     if (isBackgroundId(p.canvasBackground)) setCanvasBackground(p.canvasBackground);
     updateScenes(() => list);
     const target = list.some(s => s.id === p.activeSceneId) ? p.activeSceneId : list[0].id;
@@ -622,6 +636,7 @@ export default function App() {
   /** 드라이브에 저장. force: 다른 기기의 더 새 버전을 덮어쓴다 */
   const saveToDrive = useCallback(async (opts: { manual?: boolean; force?: boolean } = {}) => {
     if (!driveOnRef.current || driveBusyRef.current) return;
+    if (isUnlocked(lessonRef.current.lessonId)) { if (opts.manual) toast.info('암호로 잠근 노트는 구글 드라이브에 올리지 않습니다.'); return; }
     const token = await driveTokenOrNull(!!opts.manual);
     if (!token) return;
     driveBusyRef.current = true;
@@ -657,7 +672,7 @@ export default function App() {
       setDriveState(driveDirtyRef.current ? 'pending' : 'synced');
       // 드라이브 정보도 이 기기 저장에 남긴다
       saveProject(buildProject()).catch(() => {});
-      if (id) toast.success('구글 드라이브에 저장했습니다.', { id, description: "'옥쌤보드' 폴더 · 다른 기기에서 [내 수업]으로 열 수 있습니다." });
+      if (id) toast.success('구글 드라이브에 저장했습니다.', { id, description: "'옥쌤보드' 폴더 · 다른 기기에서 [내 노트]로 열 수 있습니다." });
     } catch (e: any) {
       driveDirtyRef.current = true;
       setDriveState(e?.code === 'need-auth' ? 'need-auth' : 'error');
@@ -718,16 +733,43 @@ export default function App() {
     toast.success('이 기기에서 드라이브 저장을 껐습니다.', { description: '드라이브에 있는 수업은 그대로 남아 있습니다.' });
   }, []);
 
-  const newLesson = useCallback(async (category?: string, opts: { skipSave?: boolean } = {}) => {
+  const newLesson = useCallback(async (opts: { category?: string; space?: Space; template?: TemplateDef; skipSave?: boolean } = {}) => {
     if (!opts.skipSave && dirtyRef.current) await saveRef.current(false);
     if (!opts.skipSave && driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
-    const first: Scene = { id: newId(), name: '슬라이드 1', data: null, order: 0 };
-    applyProject({ format: 'educanvas-project', version: 1, name: '새 수업', savedAt: new Date().toISOString(), activeSceneId: first.id, canvasBackground: 'blank', scenes: [{ id: first.id, name: first.name, data: null }] }, { publish: true });
-    lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null, category };
+    const now = new Date();
+    const t = opts.template;
+    const space = opts.space || t?.space || 'lesson';
+    const w = whiteboardRef.current?.getCanvas()?.width || window.innerWidth;
+    const data = t ? await buildTemplateScene(t, w, now) : null;
+    const first: Scene = { id: newId(), name: t?.paper ? '1쪽' : '슬라이드 1', data, order: 0 };
+    const name = t ? t.name(now) : '새 수업';
+    const noteDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    applyProject({ format: 'educanvas-project', version: 1, name, savedAt: now.toISOString(), activeSceneId: first.id, canvasBackground: 'blank', scenes: [{ id: first.id, name: first.name, data }] }, { publish: true });
+    lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null, category: opts.category, space, noteDate };
+    if (data) { markDirty(); setTimeout(() => { whiteboardRef.current?.goToPageNo(1); }, 400); }
     setLessonsOpen(false);
-    toast.success('새 수업을 시작했습니다.', { description: `${category ? `'${category}' 분류 · ` : ''}판서를 시작하면 [내 수업]에 자동으로 저장됩니다. 이름은 위쪽 수업 이름을 눌러 바꿉니다.` });
+    toast.success(t?.paper ? `'${name}'을(를) 만들었습니다.` : '새 수업을 시작했습니다.', {
+      description: t?.paper ? '회색 칸을 눌러 타자로 적거나 펜으로 쓰세요. 쪽이 모자라면 노트 → [공책 쪽 추가].' : `${opts.category ? `'${opts.category}' 분류 · ` : ''}판서를 시작하면 [내 노트]에 자동으로 저장됩니다.`,
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveToDrive, applyProject]);
+
+  /** 잠긴 노트면 암호를 물어 연다 (이번에 이미 넣었으면 묻지 않음) */
+  const resolveLesson = useCallback(async (id: string): Promise<StoredProject | null> => {
+    const raw = await loadLessonRaw(id);
+    if (!raw) return null;
+    if (!isLockedLesson(raw)) return raw;
+    const cached = await openWithCachedKey(raw);
+    if (cached) return cached;
+    for (let tries = 0; tries < 3; tries++) {
+      const pw = await askText({ title: `'${raw.name}' 잠금 풀기`, message: tries ? '암호가 맞지 않습니다. 다시 입력하세요.' : '암호로 잠근 노트입니다.', type: 'password', confirmLabel: '열기' });
+      if (pw == null) return null;
+      const p = await unlockLesson(raw, pw);
+      if (p) return p;
+    }
+    toast.error('암호가 맞지 않습니다.');
+    return null;
+  }, []);
 
   /** 이 컴퓨터에 저장된 수업 열기 (지금 수업은 먼저 저장) */
   const openLocalLesson = useCallback(async (id: string) => {
@@ -736,19 +778,20 @@ export default function App() {
     try {
       if (dirtyRef.current) await saveRef.current(false);
       if (driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
-      const p = await loadLesson(id);
-      if (!p) throw new Error('수업을 찾지 못했습니다.');
+      toast.dismiss(tid);
+      const p = await resolveLesson(id);
+      if (!p) return;
       applyProject(p, { publish: true });
       driveDirtyRef.current = false;
       if (driveOnRef.current) setDriveState(p.driveFileId ? 'synced' : 'pending');
       void setLastLesson(id);
       setLessonsOpen(false);
-      toast.success(`'${p.name}'을(를) 열었습니다.`, { id: tid });
+      toast.success(`'${p.name}'을(를) 열었습니다.`);
     } catch (e: any) {
       toast.error('수업을 열지 못했습니다.', { id: tid, description: e?.message });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyProject, saveToDrive]);
+  }, [applyProject, saveToDrive, resolveLesson]);
 
   // 드라이브 자동 저장: 바뀐 것이 있으면 30초마다 (그리는 중에는 기다림)
   useEffect(() => {
@@ -840,7 +883,7 @@ export default function App() {
           applyProject({ ...p, lessonId: newId() + newId(), driveFileId: undefined, driveModified: undefined }, { publish: true });
           markDirty();
           setLessonsOpen(false);
-          toast.success('파일을 열었습니다. [내 수업]에 새 수업으로 저장됩니다.', added ? { description: `3D 모델 ${added}개를 이 컴퓨터의 자산함에 넣었습니다.` } : undefined);
+          toast.success('파일을 열었습니다. [내 노트]에 새 노트로 저장됩니다.', added ? { description: `3D 모델 ${added}개를 이 컴퓨터의 자산함에 넣었습니다.` } : undefined);
         },
       });
     } catch {
@@ -976,6 +1019,97 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showCard]);
 
+  // =====================================================================
+  // 노트: 내보내기 · 잠금 · 할 일/기도 제목 모아 보기 · 노트 도구
+  // =====================================================================
+  const projectOf = useCallback(async (id: string): Promise<StoredProject | null> => {
+    if (id === lessonRef.current.lessonId) return buildRef.current();
+    return resolveLesson(id);
+  }, [resolveLesson]);
+
+  const exportById = useCallback(async (id: string, format: 'hwpx' | 'docx') => {
+    const p = await projectOf(id);
+    if (!p) return;
+    const tid = toast.loading(format === 'hwpx' ? '한글 문서를 만드는 중…' : '워드 문서를 만드는 중…');
+    try {
+      const { exportNote } = await import('./lib/noteExport');
+      await exportNote(p, format, true);
+      toast.success(format === 'hwpx' ? '한글(hwpx) 파일을 만들었습니다.' : '워드(docx) 파일을 만들었습니다.', { id: tid, description: '타자로 쓴 글은 글자로, 펜으로 쓴 내용은 쪽 그림으로 들어갑니다.' });
+    } catch (e: any) {
+      console.error(e);
+      toast.error('문서를 만들지 못했습니다.', { id: tid, description: e?.message });
+    }
+  }, [projectOf]);
+
+  const lockById = useCallback(async (id: string) => {
+    const p = await projectOf(id);
+    if (!p) return;
+    const pw = await askText({ title: '암호로 잠그기', message: `'${p.name}'을(를) 암호로 잠급니다.\n암호를 잊으면 아무도(저도) 열 수 없습니다.`, type: 'password', confirmLabel: '다음', hint: '4자 이상' });
+    if (!pw) return;
+    if (pw.length < 4) { toast.error('암호는 4자 이상으로 해 주세요.'); return; }
+    const again = await askText({ title: '암호 확인', message: '같은 암호를 한 번 더 입력하세요.', type: 'password', confirmLabel: '잠그기' });
+    if (again !== pw) { toast.error('두 암호가 다릅니다. 잠그지 않았습니다.'); return; }
+    await lockLesson(p, pw);
+    if (id === lessonRef.current.lessonId) dirtyRef.current = false;
+    toast.success('노트를 잠갔습니다.', { description: '목록에서 내용·썸네일이 가려지고, 열 때 암호를 묻습니다. 구글 드라이브에는 올리지 않습니다. (이번에 연 동안은 다시 묻지 않습니다)' });
+  }, [projectOf]);
+
+  const unlockById = useCallback(async (id: string) => {
+    const p = await projectOf(id);
+    if (!p) return;
+    await removeLock(p);
+    toast.success('잠금을 풀었습니다.');
+  }, [projectOf]);
+
+  const listChecks = useCallback(async (space: Space, kind: 'todo' | 'prayer') => {
+    const lib = await listLibrary();
+    const out: CheckItem[] = [];
+    for (const e of lib.lessons) {
+      if (e.trashedAt || spaceOf(e) !== space) continue;
+      if (e.locked && !isUnlocked(e.id)) continue;
+      const p = e.id === lessonRef.current.lessonId ? buildRef.current() : await loadLesson(e.id);
+      if (p) out.push(...checkItemsOf({ ...p, lessonId: e.id }, kind));
+    }
+    return out;
+  }, []);
+
+  const toggleCheck = useCallback(async (it: CheckItem, checked: boolean) => {
+    if (it.lessonId === lessonRef.current.lessonId) {
+      if (it.sceneId === activeIdRef.current && whiteboardRef.current?.setChecklistLine(it.objId, it.line, checked)) return;
+      captureCurrent();
+      const sc = scenesRef.current.find(x => x.id === it.sceneId);
+      const next = sc?.data ? setCheckInData(sc.data, it.objId, it.line, checked) : null;
+      if (next) { updateScenes(list => list.map(x => (x.id === it.sceneId ? { ...x, data: next } : x))); markDirty(); }
+      return;
+    }
+    const p = await loadLesson(it.lessonId);
+    if (!p) return;
+    const scenes = p.scenes.map(x => (x.id === it.sceneId && x.data ? { ...x, data: setCheckInData(x.data, it.objId, it.line, checked) || x.data } : x));
+    await saveProject({ ...p, scenes, savedAt: new Date().toISOString() }, { touchLast: false });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captureCurrent, updateScenes]);
+
+  const handleNoteTool = useCallback(async (kind: 'todo' | 'prayer' | 'bible' | 'page') => {
+    if (kind === 'page') {
+      const n = await whiteboardRef.current?.appendNotebookPage();
+      if (n == null) toast.info('공책 쪽은 양식으로 만든 노트에서 늘릴 수 있습니다.', { description: '[내 노트 → 새 노트 → 줄 공책·설교 노트·회의록 …]' });
+      else toast.success(`${n}쪽을 더했습니다.`);
+      return;
+    }
+    if (kind === 'bible') {
+      const v = await askText({ title: '성경 구절 카드', placeholder: '예: 롬 8:28-30, 시편 23편', confirmLabel: '넣기', hint: '본문은 카드에 직접 적거나 붙여넣습니다. [본문 보기]로 대한성서공회 성경을 엽니다.' });
+      if (!v) return;
+      const r = parseBibleRef(v.replace(/편/, ''));
+      if (!r) { toast.error('구절을 알아보지 못했습니다.', { description: '예: 롬 8:28, 요한복음 3장 16절, 시 23' }); return; }
+      whiteboardRef.current?.addBibleCard(r.ref);
+      toast.success(`'${r.ref}' 카드를 넣었습니다.`, { action: { label: '본문 보기', onClick: () => openWebWindow(bibleUrl(r.code, r.chap)) }, duration: 8000 });
+      return;
+    }
+    whiteboardRef.current?.addChecklist(kind);
+    toast(kind === 'todo' ? '할 일을 적으세요. 줄마다 ☐가 붙고, ☐를 누르면 체크됩니다.' : '기도 제목을 적으세요. [내 노트 → 설교 → 기도 제목 모아 보기]에 모입니다.', { description: kind === 'todo' ? '@이름 ~11/5 를 적으면 담당·기한이 됩니다.' : undefined });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 시작할 때 마지막으로 연 수업을 이어서 연다 (공유 보드로 들어온 경우는 제외)
   useEffect(() => {
     if (boardIdRef.current) return;
@@ -984,8 +1118,8 @@ export default function App() {
       applyProject(p);
       toast(`'${p.name}' 수업을 이어서 엽니다.`, {
         id: 'restore', duration: 6000,
-        description: '다른 수업은 왼쪽 위 [내 수업]에서 엽니다.',
-        action: { label: '내 수업', onClick: () => setLessonsOpen(true) },
+        description: '다른 수업은 왼쪽 위 [내 노트]에서 엽니다.',
+        action: { label: '내 노트', onClick: () => setLessonsOpen(true) },
       });
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1682,6 +1816,7 @@ export default function App() {
       {!isPresenting && (
       <TopNavBar
         studentMode={studentMode}
+        isPhone={isPhone}
         projectName={projectName}
         onRenameProject={name => { setProjectName(name); markDirty(); }}
         onSave={() => { void saveToBrowser(!driveOnRef.current); if (driveOnRef.current) void saveToDrive({ manual: true }); }}
@@ -1732,7 +1867,7 @@ export default function App() {
       <div
         className={cn(
           'absolute z-0 overflow-hidden transition-[inset,border-radius] duration-300',
-          isPresenting ? 'inset-0' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[88px] lg:left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
+          isPresenting ? 'inset-0' : isPhone ? 'top-[60px] left-1 right-1 bottom-[114px] rounded-xl ring-1 ring-slate-900/[0.06] bg-white' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[88px] lg:left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
         )}
       >
         <Whiteboard
@@ -1787,8 +1922,10 @@ export default function App() {
         onPaste={() => whiteboardRef.current?.paste()}
         onCut={() => whiteboardRef.current?.cut()}
         onStartReview={() => { void startReview(); }}
+        onNoteTool={k => { void handleNoteTool(k); }}
         onOpenStudy={() => setStudyOpen(true)}
         studentMode={studentMode}
+        isPhone={isPhone}
       />
 
       <LayerPanel
@@ -1818,7 +1955,8 @@ export default function App() {
           info={pageInfo}
           onStep={dir => { whiteboardRef.current?.stepPage(dir); }}
           onGo={n => !!whiteboardRef.current?.goToPageNo(n)}
-          className={isPresenting ? 'top-4 left-4' : isVertical ? 'top-[92px] left-[100px] lg:left-[172px]' : 'top-[92px] left-7'}
+          onAddPage={pageInfo.notebook ? () => { void handleNoteTool('page'); } : undefined}
+          className={isPresenting ? 'top-4 left-4' : isPhone ? 'top-[68px] left-3' : isVertical ? 'top-[92px] left-[100px] lg:left-[172px]' : 'top-[92px] left-7'}
         />
       )}
       {activeScore && (
@@ -1886,6 +2024,7 @@ export default function App() {
 
       {!isPresenting && (
       <BottomNavBar
+        isPhone={isPhone}
         zoomLevel={zoomLevel}
         onResetZoom={() => whiteboardRef.current?.resetZoom()}
         onZoomIn={() => whiteboardRef.current?.zoomIn()}
@@ -1983,6 +2122,7 @@ export default function App() {
         onClose={() => setReview(null)}
       />
 
+      <PromptHost />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard
         isOpen={lessonsOpen}
@@ -1990,12 +2130,20 @@ export default function App() {
         currentLessonId={lessonRef.current.lessonId}
         onCurrentRenamed={name => { setProjectName(name); markDirty(); }}
         onCurrentCategory={c => { lessonRef.current.category = c; markDirty(); }}
+        onCurrentSpace={sp => { lessonRef.current.space = sp; markDirty(); }}
+        defaultSpace={studentMode ? 'student' : undefined}
+        onOpenWrongNote={() => { void openLocalLesson(WRONG_NOTE_ID).then(() => { if (lessonRef.current.lessonId !== WRONG_NOTE_ID) toast.info('아직 오답 노트가 없습니다.', { description: '[공부·복습 → 오답 모으기]로 문제를 모으면 생깁니다.' }); }); }}
+        onExport={(id, f) => { void exportById(id, f); }}
+        onLock={lockById}
+        onUnlock={unlockById}
+        listChecks={listChecks}
+        toggleCheck={toggleCheck}
         saveCurrent={async () => { if (dirtyRef.current) await saveRef.current(false); }}
         onOpen={id => { void openLocalLesson(id); }}
-        onNew={c => { void newLesson(c); }}
+        onNew={o => { void newLesson(o); }}
         onImportFile={() => projectFileInputRef.current?.click()}
         onShowHistory={id => { setHistoryLesson(id); setHistoryOpen(true); }}
-        onCurrentTrashed={() => { dirtyRef.current = false; void newLesson(undefined, { skipSave: true }); }}
+        onCurrentTrashed={() => { dirtyRef.current = false; void newLesson({ skipSave: true }); }}
         drive={{ on: driveOn, state: driveState, enable: enableDrive, disable: disableDrive, list: listDriveLessons, open: l => { void openDriveLesson(l); } }}
       />
       <StudentCastModal

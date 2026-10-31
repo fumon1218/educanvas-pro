@@ -1,7 +1,7 @@
 import * as fabric from 'fabric';
 
 /** 캔버스 직렬화 시 함께 저장할 사용자 정의 속성 */
-export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url', 'clipStart', 'clipEnd', 'isModel', 'modelId', 'modelName', 'driveId', 'isScore', 'scoreData', 'scoreTitle', 'scoreKey', 'scoreBoxes', 'pageNo', 'docId', 'docPage', 'isFlash', 'flashBox', 'flashDue'];
+export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url', 'clipStart', 'clipEnd', 'isModel', 'modelId', 'modelName', 'driveId', 'isScore', 'scoreData', 'scoreTitle', 'scoreKey', 'scoreBoxes', 'pageNo', 'docId', 'docPage', 'isFlash', 'flashBox', 'flashDue', 'field', 'fieldLabel', 'isPlaceholder', 'checklist', 'notebook', 'bibleRef'];
 
 /** 세션 동안 살아 있는 동영상 요소 (blob URL → video element) */
 export const videoRegistry = new Map<string, HTMLVideoElement>();

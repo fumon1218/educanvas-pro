@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown, Users, Share, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Sparkles, ArrowRight,
   Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer, Play, Cloud, CloudOff, Eraser, Paintbrush, MonitorSmartphone,
-  History, LayoutGrid,
+  History, LayoutGrid, MoreHorizontal,
 } from 'lucide-react';
 import { glass } from './BottomNavBar';
 import { cn } from '@/src/lib/utils';
@@ -46,6 +46,8 @@ interface TopNavBarProps {
   onOpenStudentCast: () => void;
   /** 학생 모드: 공유·협업·학생 화면·AI를 숨긴다 */
   studentMode?: boolean;
+  /** 휴대폰: 오른쪽 단추·수업 도구를 [⋯] 메뉴로 */
+  isPhone?: boolean;
   castCount?: number;
   castOn?: boolean;
   driveState?: 'off' | 'synced' | 'saving' | 'pending' | 'need-auth' | 'error' | 'conflict';
@@ -75,7 +77,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
   isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
   onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false, saveState = 'saved',
-  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false, driveState = 'off', onOpenLessons, studentMode = false,
+  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false, driveState = 'off', onOpenLessons, studentMode = false, isPhone = false,
 }) => {
   const [bgOpen, setBgOpen] = useState(false);
   const bgRef = useRef<HTMLDivElement>(null);
@@ -144,21 +146,21 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   return (
     <>
       {/* 상단 막대 */}
-      <div className={cn('absolute top-3 left-4 right-4 z-50 h-14 flex items-center gap-2 sm:gap-3 px-3 rounded-2xl', glass)}>
-        <div className="flex items-center gap-2 pr-2 select-none shrink-0" title="옥쌤보드">
+      <div className={cn('absolute z-50 flex items-center rounded-2xl', isPhone ? 'top-2 left-2 right-2 h-12 gap-1 px-1.5' : 'top-3 left-4 right-4 h-14 gap-2 sm:gap-3 px-3', glass)}>
+        <div className={cn('items-center gap-2 pr-2 select-none shrink-0', isPhone ? 'hidden' : 'flex')} title="옥쌤보드">
           <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="w-8 h-8 rounded-[10px] shadow-sm" />
           <span className="hidden md:inline text-[17px] font-extrabold text-slate-900 tracking-tight">옥쌤보드</span>
         </div>
-        <button onClick={onOpenLessons} className="flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-[14px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 shrink-0" aria-label="내 수업 목록" title="내 수업 목록 (저장한 수업 모두 보기·분류)">
+        <button onClick={onOpenLessons} className="flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-[14px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 shrink-0" aria-label="내 노트 목록" title="내 노트 목록 (수업·학생·설교·업무 노트 모두 보기·분류)">
           <LayoutGrid size={16} />
-          <span className="hidden sm:inline whitespace-nowrap">내 수업</span>
+          <span className="hidden sm:inline whitespace-nowrap">내 노트</span>
         </button>
-        <div className="w-px h-6 bg-slate-200" />
+        <div className={cn('w-px h-6 bg-slate-200', isPhone && 'hidden')} />
         <div className="relative" ref={menuRef}>
           <button onClick={() => setIsFileMenuOpen(o => !o)} className="flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-[14px] font-medium text-slate-700 hover:bg-slate-900/[0.05]" aria-haspopup="menu" aria-expanded={isFileMenuOpen}>
             <FileIcon size={16} className="text-slate-500" />
-            <span className="whitespace-nowrap">파일</span>
-            <ChevronDown size={15} className="text-slate-400" />
+            <span className={cn('whitespace-nowrap', isPhone && 'sr-only')}>파일</span>
+            {!isPhone && <ChevronDown size={15} className="text-slate-400" />}
           </button>
           <AnimatePresence>
             {isFileMenuOpen && (
@@ -170,7 +172,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
                 className="absolute z-50 top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] ring-1 ring-slate-900/[0.07] overflow-hidden py-1.5"
               >
                 <MenuItem icon={Save} label="저장" hint="Ctrl+S" onClick={run(onSave)} />
-                <MenuItem icon={LayoutGrid} label="내 수업 (목록·분류)" hint="모든 수업" onClick={run(onOpenLessons)} />
+                <MenuItem icon={LayoutGrid} label="내 노트 (목록·분류)" hint="모든 노트" onClick={run(onOpenLessons)} />
                 {onOpenHistory && <MenuItem icon={History} label="수업 기록 (자동 보관)" hint="되살리기" onClick={run(onOpenHistory)} />}
                 <div className="h-px bg-slate-100 my-1" />
                 <MenuItem icon={Download} label="파일로 내보내기 (.json)" onClick={run(onExportFile)} />
@@ -200,7 +202,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
               aria-label="수업 이름"
             />
           ) : (
-            <button onClick={() => setEditingName(true)} title="눌러서 수업 이름 바꾸기" className="px-2 py-1.5 text-[14px] font-semibold text-slate-800 rounded-lg hover:bg-slate-900/[0.05] truncate max-w-[120px] sm:max-w-[260px]">
+            <button onClick={() => setEditingName(true)} title="눌러서 수업 이름 바꾸기" className="px-2 py-1.5 text-[14px] font-semibold text-slate-800 rounded-lg hover:bg-slate-900/[0.05] truncate max-w-[110px] sm:max-w-[260px]">
               {projectName}
             </button>
           )}
@@ -218,6 +220,17 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
 
         <div className="flex-1" />
 
+        {isPhone && <PhoneMore items={[
+          { label: '발표', icon: Play, onClick: onPresent },
+          ...(!studentMode ? [{ label: castOn ? `학생 화면 · ${castCount}명` : '학생 화면', icon: MonitorSmartphone, onClick: onOpenStudentCast }, { label: '협업', icon: Users, onClick: onOpenMultiplayer }, { label: isSharing ? '링크 복사' : '공유', icon: Share, onClick: onShare }] : []),
+          { label: '가림막', icon: PanelBottomClose, onClick: onToggleShade, on: shadeOn },
+          { label: '스포트라이트', icon: Flashlight, onClick: onToggleSpotlight, on: spotlightOn },
+          { label: '타이머', icon: Timer, onClick: onToggleTimer, on: timerOn },
+          { label: '배경', icon: Paintbrush, onClick: () => setBgOpen(o => !o) },
+          { label: '이 슬라이드 지우기', icon: Eraser, onClick: onClearAll },
+          { label: '설정', icon: Settings, onClick: onOpenSettings },
+        ]} />}
+        <div className={cn('items-center gap-2 sm:gap-3', isPhone ? 'hidden' : 'flex')}>
         <button onClick={onPresent} className="flex items-center gap-2 h-10 px-4 rounded-xl bg-slate-900 text-white text-[14px] font-semibold hover:bg-black shadow-sm" title="발표 모드 (전체 화면)">
           <Play size={15} fill="currentColor" />
           <span className="hidden sm:inline whitespace-nowrap">발표</span>
@@ -260,21 +273,24 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
           </button>
         </div>
         </>}
+        </div>
       </div>
 
-      {/* 오른쪽 위 수업 도구 카드 */}
-      <div ref={bgRef} className={cn('absolute top-[86px] right-6 z-40 flex items-center gap-0.5 p-1.5 rounded-2xl', glass)}>
+      {/* 오른쪽 위 수업 도구 카드 (휴대폰은 ⋯ 메뉴) */}
+      <div ref={bgRef} className={cn('absolute z-40 items-center gap-0.5 p-1.5 rounded-2xl', isPhone ? 'top-[60px] right-2 flex p-0 bg-transparent' : 'top-[86px] right-6 flex', !isPhone && glass)}>
+        {!isPhone && <>
         <CardBtn icon={PanelBottomClose} label="가림막" active={shadeOn} onClick={onToggleShade} />
         <CardBtn icon={Flashlight} label="스포트라이트" active={spotlightOn} onClick={onToggleSpotlight} />
         <CardBtn icon={Timer} label="타이머" active={timerOn} onClick={onToggleTimer} />
         <CardBtn icon={Paintbrush} label="배경" title="수업 배경 (오선지·원고지·영어 4선 등)" active={bgOpen} onClick={() => setBgOpen(o => !o)} />
         <CardBtn icon={Eraser} label="지우기" title="이 슬라이드 지우기" danger onClick={onClearAll} />
         <CardBtn icon={Settings} label="설정" onClick={onOpenSettings} />
+        </>}
         <AnimatePresence>
           {bgOpen && (
             <motion.div
               initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-              className="absolute right-0 top-full mt-2 w-[340px] p-3 rounded-2xl bg-white/95 backdrop-blur-xl ring-1 ring-slate-900/[0.07] shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)]"
+              className="absolute right-0 top-full mt-2 w-[min(340px,calc(100vw-16px))] p-3 rounded-2xl bg-white/95 backdrop-blur-xl ring-1 ring-slate-900/[0.07] shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)]"
               role="dialog" aria-label="수업 배경"
             >
               <div className="px-1 pb-2 text-[12px] font-semibold text-slate-500">수업 배경</div>
@@ -284,5 +300,33 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
         </AnimatePresence>
       </div>
     </>
+  );
+};
+
+/** 휴대폰 상단 [⋯] 메뉴 */
+const PhoneMore: React.FC<{ items: { label: string; icon: React.ElementType; onClick: () => void; on?: boolean }[] }> = ({ items }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [open]);
+  return (
+    <div className="relative ml-auto shrink-0" ref={ref}>
+      <button onClick={() => setOpen(o => !o)} className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-700 hover:bg-slate-900/[0.05]" aria-label="더 보기 메뉴" aria-expanded={open} aria-haspopup="menu">
+        <MoreHorizontal size={20} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full mt-2 w-56 py-1.5 bg-white rounded-2xl shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] ring-1 ring-slate-900/[0.07] z-50">
+          {items.map(it => (
+            <button key={it.label} role="menuitem" onClick={() => { setOpen(false); it.onClick(); }} className={cn('w-full h-11 px-4 flex items-center gap-3 text-[14px] text-left', it.on ? 'text-indigo-700 font-semibold bg-indigo-50' : 'text-slate-700 hover:bg-slate-50')}>
+              <it.icon size={17} />{it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };

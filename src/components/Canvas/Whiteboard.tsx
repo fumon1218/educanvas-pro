@@ -12,6 +12,7 @@ import {
 } from '@/src/lib/canvasData';
 import { toast } from 'sonner';
 import { PressureBrush, getPenSettings, notePointer } from '@/src/lib/pen';
+import { appendPaper, makeChecklist } from '@/src/lib/templates';
 
 export type ToolType =
   | 'pen' | 'eraser' | 'laser' | 'select' | 'lasso' | 'pencil' | 'fountain' | 'ballpoint'
@@ -97,7 +98,7 @@ export interface WhiteboardHandle {
   /** 한 슬라이드에 이어 붙인 PDF 쪽을 넘긴다. 더 넘길 쪽이 없으면 false */
   stepPage: (dir: 1 | -1) => boolean;
   /** 이어 붙인 PDF 쪽 정보 (없으면 null) */
-  getPageInfo: () => { index: number; total: number; pageNo: number; first: number; last: number } | null;
+  getPageInfo: () => { index: number; total: number; pageNo: number; first: number; last: number; notebook?: boolean } | null;
   /** PDF 쪽 번호로 이동 */
   goToPageNo: (n: number) => boolean;
   /** 이 슬라이드의 가림 카드들 */
@@ -106,6 +107,14 @@ export interface WhiteboardHandle {
   focusObject: (id: string) => boolean;
   /** 가림 카드 덮기/열기, 복습 단계 바꾸기 */
   setFlash: (id: string, patch: { revealed?: boolean; box?: number; due?: number }) => void;
+  /** 공책(양식) 슬라이드에 쪽 하나 더하기. 공책이 아니면 null */
+  appendNotebookPage: () => Promise<number | null>;
+  /** 화면 가운데에 할 일·기도 제목 목록 넣기 */
+  addChecklist: (kind: 'todo' | 'prayer') => void;
+  /** 성경 구절 카드 넣기 */
+  addBibleCard: (ref: string) => void;
+  /** 체크 목록의 한 줄 체크/해제 */
+  setChecklistLine: (objId: string, line: number, checked: boolean) => boolean;
   getLaserCanvas: () => HTMLCanvasElement | null;
   /** 녹화용: [판서 캔버스, 그리는 중인 선 캔버스, 레이저 캔버스] */
   getRecordLayers: () => (HTMLCanvasElement | null)[];
@@ -966,10 +975,66 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     stepPage,
     getPageInfo: () => {
       const pages = stackedPages();
-      if (pages.length < 2) return null;
+      const notebook = pages.some(p => (p as any).notebook);
+      if (pages.length < 2 && !notebook) return null;
+      if (!pages.length) return null;
       const i = Math.max(0, currentPageIndex(pages));
       const nos = pages.map(p => (p as any).pageNo as number);
-      return { index: i, total: pages.length, pageNo: nos[i], first: Math.min(...nos), last: Math.max(...nos) };
+      return { index: i, total: pages.length, pageNo: nos[i], first: Math.min(...nos), last: Math.max(...nos), notebook };
+    },
+    appendNotebookPage: async () => {
+      const canvas = fabricRef.current;
+      if (!canvas) return null;
+      const n = await appendPaper(canvas);
+      if (n == null) return null;
+      const page = stackedPages().find(p => (p as any).pageNo === n);
+      if (page) fitRect(page.getBoundingRect());
+      commitChange();
+      return n;
+    },
+    addChecklist: (kind: 'todo' | 'prayer') => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const z = canvas.getZoom();
+      const c = canvas.getVpCenter();
+      const w = Math.min(560, (canvas.width / z) * 0.6);
+      const head = new fabric.FabricText(kind === 'todo' ? '할 일' : '기도 제목', { fontSize: 22, fontWeight: 'bold', fill: kind === 'todo' ? '#dc2626' : '#d97706', fontFamily: KOREAN_FONT, originX: 'left', originY: 'top', left: c.x - w / 2, top: c.y - 80 });
+      (head as any).id = newId();
+      const t = makeChecklist(kind, c.x - w / 2, c.y - 44, w, 22, '☐ ');
+      canvas.add(head, t);
+      canvas.setActiveObject(t);
+      (t as fabric.Textbox).enterEditing();
+      (t as fabric.Textbox).selectionStart = (t as fabric.Textbox).selectionEnd = 2;
+      canvas.requestRenderAll();
+    },
+    addBibleCard: (ref: string) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const z = canvas.getZoom();
+      const c = canvas.getVpCenter();
+      const w = Math.min(600, (canvas.width / z) * 0.6);
+      const t = new fabric.Textbox(`📖 ${ref}\n본문을 여기에 적거나 붙여넣으세요`, {
+        left: c.x - w / 2, top: c.y - 50, width: w, originX: 'left', originY: 'top', fontSize: 22, lineHeight: 1.4,
+        fill: '#1e293b', fontFamily: KOREAN_FONT, backgroundColor: '#fef3c7', padding: 14,
+        styles: { 0: Object.fromEntries(Array.from({ length: ref.length + 3 }, (_, i) => [i, { fontWeight: 'bold', fill: '#92400e' }])) } as any,
+      });
+      Object.assign(t as any, { id: newId(), bibleRef: ref });
+      canvas.add(t);
+      canvas.setActiveObject(t);
+      canvas.requestRenderAll();
+    },
+    setChecklistLine: (objId: string, line: number, checked: boolean) => {
+      const canvas = fabricRef.current;
+      const o: any = canvas?.getObjects().find((x: any) => x.id === objId);
+      if (!canvas || !o || !o.checklist) return false;
+      const lines = String(o.text).split('\n');
+      if (!lines[line]) return false;
+      lines[line] = (checked ? '☑' : '☐') + lines[line].replace(/^[☐☑]/, '');
+      o.set({ text: lines.join('\n') });
+      o.initDimensions?.();
+      canvas.requestRenderAll();
+      commitChange();
+      return true;
     },
     goToPageNo: (n: number) => {
       const pages = stackedPages();
@@ -1178,6 +1243,33 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       if (k !== lastVpt) { lastVpt = k; propsRef.current.onViewChange?.(); }
       const hk = `${k}|${canvas.getObjects().length}`;
       if (hk !== hd.key) { hd.key = hk; scheduleHd(); }
+    });
+    // 양식 칸: 처음 쓰기 시작하면 회색 안내 글자를 지운다
+    canvas.on('text:editing:entered', (e: any) => {
+      const t = e.target;
+      if (t?.isPlaceholder) {
+        t.isPlaceholder = false;
+        t.set({ text: '', fill: '#0f172a' });
+        // 입력용 숨은 글상자도 비워야 안내 글자가 다시 붙지 않는다
+        if (t.hiddenTextarea) t.hiddenTextarea.value = '';
+        t.selectionStart = t.selectionEnd = 0;
+        t.initDimensions?.();
+        canvas.requestRenderAll();
+      }
+    });
+    // 체크 목록: 글자를 고친 뒤 줄마다 ☐를 붙인다 (빈 칸으로 비우면 안내 글자로 되돌림)
+    canvas.on('text:editing:exited', (e: any) => {
+      const t = e.target;
+      if (!t) return;
+      if (t.checklist) {
+        const lines = String(t.text).split('\n').map((l: string) => (l.trim() && !/^[☐☑]/.test(l) ? '☐ ' + l : l));
+        const next = lines.join('\n');
+        if (next !== t.text) { t.set({ text: next }); canvas.requestRenderAll(); commitChange(); }
+      } else if (t.field && !String(t.text).trim()) {
+        t.isPlaceholder = true;
+        t.set({ text: '(여기에 쓰기)', fill: '#94a3b8' });
+        canvas.requestRenderAll();
+      }
     });
     canvas.on('object:added', e => {
       const obj = e.target;
@@ -1544,6 +1636,38 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       hoverDot.style.top = `${e.clientY - rect.top}px`;
       hoverDot.style.display = 'block';
     };
+    /** 체크 목록 줄 앞(☐)을 누르면 체크/해제 (선택·지우개 도구 제외) */
+    const toggleCheckAt = (e: PointerEvent): boolean => {
+      const t = toolRef.current;
+      if (t === 'select' || t === 'eraser' || t === 'lasso') return false;
+      if (e.pointerType === 'touch' && fingerPansNow()) return false;
+      const rect = canvas.upperCanvasEl.getBoundingClientRect();
+      const sp = fabric.util.transformPoint(new fabric.Point(e.clientX - rect.left, e.clientY - rect.top), fabric.util.invertTransform(canvas.viewportTransform));
+      const objs = canvas.getObjects() as any[];
+      for (let i = objs.length - 1; i >= 0; i--) {
+        const o = objs[i];
+        if (!o.checklist || !o.visible || o.isEditing || !o.containsPoint(sp)) continue;
+        const local = fabric.util.transformPoint(sp, fabric.util.invertTransform(o.calcTransformMatrix()));
+        const x = local.x + o.width / 2, y = local.y + o.height / 2;
+        if (x > o.fontSize * 1.6) return false; // 줄 앞 상자만
+        let acc = 0, wrapped = -1;
+        for (let li = 0; li < o._textLines.length; li++) { const h = o.getHeightOfLine(li); if (y < acc + h) { wrapped = li; break; } acc += h; }
+        if (wrapped < 0) return false;
+        const map = o._styleMap?.[wrapped];
+        if (map && map.offset !== 0) return false;
+        const line = map ? map.line : wrapped;
+        const lines = String(o.text).split('\n');
+        const cur = lines[line] || '';
+        if (!/^[☐☑]/.test(cur)) return false;
+        lines[line] = (cur[0] === '☑' ? '☐' : '☑') + cur.slice(1);
+        o.set({ text: lines.join('\n') });
+        o.initDimensions?.();
+        canvas.requestRenderAll();
+        commitChange();
+        return true;
+      }
+      return false;
+    };
     const flipFlashAt = (e: PointerEvent): boolean => {
       const t = toolRef.current;
       if (t === 'select' || t === 'eraser' || t === 'lasso' || t === 'flashcard') return false;
@@ -1564,7 +1688,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     };
     const blockPenHover = (e: any) => {
       notePointer(e);
-      if (e.type === 'pointerdown' && (e.buttons || e.pointerType !== 'pen' || e.pressure > 0) && flipFlashAt(e)) { e.stopPropagation(); e.preventDefault(); return; }
+      if (e.type === 'pointerdown' && (e.buttons || e.pointerType !== 'pen' || e.pressure > 0) && (toggleCheckAt(e) || flipFlashAt(e))) { e.stopPropagation(); e.preventDefault(); return; }
       if (e.pointerType === 'pen') {
         lastPenTime = Date.now();
         onPenFirstSeen();

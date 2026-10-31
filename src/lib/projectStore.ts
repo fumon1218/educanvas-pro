@@ -27,6 +27,10 @@ export interface StoredProject {
   driveModified?: string;
   /** 분류 (예: '3학년 과학') */
   category?: string;
+  /** 공간: 수업·학생·설교·업무 */
+  space?: Space;
+  /** 노트 날짜 (YYYY-MM-DD, 달력 보기) */
+  noteDate?: string;
   /** 내보낸 파일에만: 함께 담은 3D 모델 */
   assets?: { models: PackedModel[] };
 }
@@ -74,8 +78,23 @@ async function withDB<T>(fn: (db: IDBDatabase) => Promise<T>): Promise<T> {
 //  수업마다 따로 칸(lesson:<번호>)에 저장하고, 목록(library-index)에 이름·분류·썸네일을 둔다.
 // ===========================================================================
 
+export type Space = 'lesson' | 'student' | 'sermon' | 'work';
+export const SPACES: { id: Space; label: string; noun: string }[] = [
+  { id: 'lesson', label: '수업', noun: '수업' },
+  { id: 'student', label: '학생', noun: '공부 노트' },
+  { id: 'sermon', label: '설교', noun: '설교 노트' },
+  { id: 'work', label: '업무', noun: '업무 노트' },
+];
+export const spaceOf = (x: { space?: Space }) => x.space || 'lesson';
+
 export interface LibraryEntry {
   id: string;
+  space?: Space;
+  noteDate?: string;
+  /** 내용 찾기용 글자 (잠긴 노트는 비움) */
+  text?: string;
+  /** 암호로 잠근 노트 */
+  locked?: boolean;
   name: string;
   savedAt: string;
   createdAt: string;
@@ -96,17 +115,108 @@ const LEGACY_CURRENT = 'current';
 const LEGACY_PREV = 'previous';
 const TRASH_DAYS = 30;
 
-const entryOf = (p: StoredProject, prev?: LibraryEntry): LibraryEntry => ({
-  ...(prev || {}),
-  id: lessonOf(p),
-  name: p.name || '수업',
-  savedAt: p.savedAt,
-  createdAt: prev?.createdAt || p.savedAt,
-  slides: p.scenes?.length || 0,
-  thumb: p.scenes?.find(s => s.id === p.activeSceneId)?.thumbnail || p.scenes?.[0]?.thumbnail || prev?.thumb,
-  category: p.category ?? prev?.category,
-  driveFileId: p.driveFileId || prev?.driveFileId,
-});
+/** 노트에 타자로 쓴 글자들 (내용 찾기·내보내기) */
+export function textOfScene(data: string | null | undefined): string[] {
+  if (!data || !data.includes('"text"')) return [];
+  const out: string[] = [];
+  const walk = (objs: any[]) => objs?.forEach(o => {
+    if (!o) return;
+    if (typeof o.text === 'string' && !o.isPlaceholder && o.text.trim()) out.push(o.text.trim());
+    if (Array.isArray(o.objects)) walk(o.objects);
+  });
+  try { walk(JSON.parse(data).objects || []); } catch { /* 무시 */ }
+  return out;
+}
+
+const entryOf = (p: StoredProject, prev?: LibraryEntry, locked = false): LibraryEntry => {
+  const e: LibraryEntry = {
+    ...(prev || {}),
+    id: lessonOf(p),
+    name: p.name || '수업',
+    savedAt: p.savedAt,
+    createdAt: prev?.createdAt || p.savedAt,
+    slides: p.scenes?.length || 0,
+    thumb: locked ? undefined : p.scenes?.find(s => s.id === p.activeSceneId)?.thumbnail || p.scenes?.[0]?.thumbnail || prev?.thumb,
+    category: p.category ?? prev?.category,
+    space: p.space ?? prev?.space,
+    noteDate: p.noteDate ?? prev?.noteDate,
+    driveFileId: p.driveFileId || prev?.driveFileId,
+    text: locked ? undefined : p.scenes?.flatMap(s => textOfScene(s.data)).join(' · ').replace(/\s+/g, ' ').slice(0, 6000),
+  };
+  if (locked) e.locked = true; else delete e.locked;
+  return e;
+};
+
+// ===========================================================================
+// 노트 잠금: 암호로 잠근 노트는 내용을 암호화해서 저장한다 (AES-GCM, 암호에서 PBKDF2로 열쇠를 만든다)
+// 암호를 잊으면 열 수 없다. 잠긴 노트는 썸네일·찾기 글자·수업 기록·드라이브 저장에서 빠진다.
+// ===========================================================================
+
+export interface LockedLesson { format: 'okssam-locked'; v: 1; lessonId: string; name: string; savedAt: string; salt: string; iv: string; data: string }
+export const isLockedLesson = (p: any): p is LockedLesson => p?.format === 'okssam-locked';
+const unlocked = new Map<string, { key: CryptoKey; salt: Uint8Array }>();
+export const isUnlocked = (id: string) => unlocked.has(id);
+const b64 = (u: Uint8Array) => { let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+const unb64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function deriveKey(password: string, salt: Uint8Array) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 250_000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function encryptProject(p: StoredProject, k: { key: CryptoKey; salt: Uint8Array }): Promise<LockedLesson> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k.key, new TextEncoder().encode(JSON.stringify(p))));
+  return { format: 'okssam-locked', v: 1, lessonId: lessonOf(p), name: p.name, savedAt: p.savedAt, salt: b64(k.salt), iv: b64(iv), data: b64(data) };
+}
+/** 이번에 이미 암호를 넣은 노트면 다시 묻지 않고 연다 */
+export async function openWithCachedKey(l: LockedLesson): Promise<StoredProject | null> {
+  const k = unlocked.get(l.lessonId);
+  if (!k) return null;
+  try {
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(l.iv) }, k.key, unb64(l.data));
+    return { ...(JSON.parse(new TextDecoder().decode(plain)) as StoredProject), lessonId: l.lessonId };
+  } catch { return null; }
+}
+/** 잠긴 노트 열기. 암호가 틀리면 null */
+export async function unlockLesson(l: LockedLesson, password: string): Promise<StoredProject | null> {
+  try {
+    const salt = unb64(l.salt);
+    const key = await deriveKey(password, salt);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(l.iv) }, key, unb64(l.data));
+    const p = JSON.parse(new TextDecoder().decode(plain)) as StoredProject;
+    unlocked.set(l.lessonId, { key, salt });
+    return { ...p, lessonId: l.lessonId };
+  } catch { return null; }
+}
+/** 이 노트를 암호로 잠근다 (수업 기록에 남은 예전 모습도 지운다) */
+export async function lockLesson(p: StoredProject, password: string): Promise<void> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await deriveKey(password, salt);
+  const id = lessonOf(p);
+  unlocked.set(id, { key, salt });
+  const enc = await encryptProject({ ...p, lessonId: id }, { key, salt });
+  await withDB(async db => {
+    await ensureMigrated(db);
+    await runTx(db, 'readwrite', async store => {
+      const { index, meta } = await readLib(store);
+      const i = index.findIndex(e => e.id === id);
+      const entry = entryOf(p, i >= 0 ? index[i] : undefined, true);
+      if (i >= 0) index[i] = entry; else index.push(entry);
+      store.put(enc, LESSON(id));
+      store.put(index, LIB_INDEX);
+      store.put(meta, LIB_META);
+      const h = ((await reqP(store.get('history-index'))) as HistoryEntry[] | undefined) || [];
+      h.filter(x => x.lessonId === id).forEach(x => store.delete(x.id));
+      store.put(h.filter(x => x.lessonId !== id), 'history-index');
+    });
+  });
+}
+/** 잠금 풀기 (열려 있는 노트만) */
+export async function removeLock(p: StoredProject): Promise<void> {
+  unlocked.delete(lessonOf(p));
+  await saveProject(p, { touchLast: false, plain: true });
+}
+/** 앱을 잠시 떠나면 다시 암호를 묻도록 열쇠를 잊는다 */
+export const forgetUnlocked = (id?: string) => { if (id) unlocked.delete(id); else unlocked.clear(); };
 
 async function readLib(store: IDBObjectStore): Promise<{ index: LibraryEntry[]; meta: LibraryMeta }> {
   const [i, m] = await Promise.all([reqP(store.get(LIB_INDEX)), reqP(store.get(LIB_META))]);
@@ -162,11 +272,20 @@ export async function listLibrary(): Promise<{ lessons: LibraryEntry[]; categori
 }
 
 export async function loadLesson(id: string): Promise<StoredProject | null> {
+  const raw = await loadLessonRaw(id);
+  if (!raw) return null;
+  if (isLockedLesson(raw)) return null; // 잠긴 노트는 loadLessonRaw + unlockLesson으로
+  return raw;
+}
+
+/** 잠긴 노트면 LockedLesson 그대로 */
+export async function loadLessonRaw(id: string): Promise<StoredProject | LockedLesson | null> {
   return withDB(async db => {
     await ensureMigrated(db);
-    let p: StoredProject | undefined;
-    await runTx(db, 'readonly', async store => { p = (await reqP(store.get(LESSON(id)))) as StoredProject | undefined; });
-    return p ? { ...p, lessonId: id } : null;
+    let p: any;
+    await runTx(db, 'readonly', async store => { p = await reqP(store.get(LESSON(id))); });
+    if (!p) return null;
+    return isLockedLesson(p) ? p : { ...p, lessonId: id };
   });
 }
 
@@ -178,7 +297,7 @@ export async function loadProject(): Promise<StoredProject | null> {
 }
 
 /** 목록 정보 바꾸기 (이름·분류·즐겨찾기·휴지통). 이름·분류는 수업 파일에도 적는다 */
-export async function updateLesson(id: string, patch: Partial<Pick<LibraryEntry, 'name' | 'category' | 'favorite' | 'trashedAt'>>): Promise<void> {
+export async function updateLesson(id: string, patch: Partial<Pick<LibraryEntry, 'name' | 'category' | 'favorite' | 'trashedAt' | 'space' | 'noteDate'>>): Promise<void> {
   await withDB(async db => {
     await ensureMigrated(db);
     await runTx(db, 'readwrite', async store => {
@@ -188,9 +307,16 @@ export async function updateLesson(id: string, patch: Partial<Pick<LibraryEntry,
       Object.assign(e, patch);
       if (patch.trashedAt === undefined && 'trashedAt' in patch) delete e.trashedAt;
       if (patch.category === '' ) delete e.category;
-      if ('name' in patch || 'category' in patch) {
-        const p = (await reqP(store.get(LESSON(id)))) as StoredProject | undefined;
-        if (p) store.put({ ...p, ...(patch.name ? { name: patch.name } : {}), ...('category' in patch ? { category: patch.category || undefined } : {}) }, LESSON(id));
+      if ('name' in patch || 'category' in patch || 'space' in patch || 'noteDate' in patch) {
+        const p = (await reqP(store.get(LESSON(id)))) as StoredProject | LockedLesson | undefined;
+        // 잠긴 노트는 목록 정보만 바꾼다 (내용은 열 때 맞춰짐)
+        if (p && !isLockedLesson(p)) store.put({
+          ...p,
+          ...(patch.name ? { name: patch.name } : {}),
+          ...('category' in patch ? { category: patch.category || undefined } : {}),
+          ...('space' in patch ? { space: patch.space } : {}),
+          ...('noteDate' in patch ? { noteDate: patch.noteDate } : {}),
+        }, LESSON(id));
       }
       if (patch.category && !meta.categories.includes(patch.category)) meta.categories.push(patch.category);
       store.put(index, LIB_INDEX);
@@ -289,19 +415,21 @@ async function trimHistory(db: IDBDatabase) {
  * 20분마다 직전 모습을 수업 기록에 보관하고, 보관이 실패해도 저장은 반드시 한다.
  * 아직 아무것도 그리지 않은 새 수업은 목록에 올리지 않는다.
  */
-export async function saveProject(project: StoredProject, opts: { touchLast?: boolean } = {}): Promise<void> {
+export async function saveProject(project: StoredProject, opts: { touchLast?: boolean; plain?: boolean } = {}): Promise<void> {
   const id = lessonOf(project);
   const p = { ...project, lessonId: id };
+  const lockKey = opts.plain ? undefined : unlocked.get(id);
+  const stored: StoredProject | LockedLesson = lockKey ? await encryptProject(p, lockKey) : p;
   await withDB(async db => {
     await ensureMigrated(db);
     let skip = false;
     try {
       await runTx(db, 'readwrite', async store => {
         const [oldRaw, hRaw, lib] = await Promise.all([reqP(store.get(LESSON(id))), reqP(store.get(INDEX_KEY)), readLib(store)]);
-        const old = oldRaw as StoredProject | undefined;
-        if (!old && !hasContent(p) && !lib.index.some(e => e.id === id)) { skip = true; return; }
+        const old = isLockedLesson(oldRaw) ? undefined : (oldRaw as StoredProject | undefined);
+        if (!oldRaw && !hasContent(p) && !lib.index.some(e => e.id === id)) { skip = true; return; }
         let h = (hRaw as HistoryEntry[] | undefined) || [];
-        if (old && hasContent(old)) {
+        if (old && !lockKey && hasContent(old)) {
           const last = h.find(x => x.lessonId === id);
           if (Date.now() - (last ? Date.parse(last.keptAt) : 0) > SNAPSHOT_EVERY_MS) { h = pushHistory(store, h, old, 'snapshot'); store.put(h, INDEX_KEY); }
         }
@@ -311,9 +439,9 @@ export async function saveProject(project: StoredProject, opts: { touchLast?: bo
     const put = () => runTx(db, 'readwrite', async store => {
       const { index, meta } = await readLib(store);
       const i = index.findIndex(e => e.id === id);
-      const entry = entryOf(p, i >= 0 ? index[i] : undefined);
+      const entry = entryOf(p, i >= 0 ? index[i] : undefined, !!lockKey);
       if (i >= 0) index[i] = entry; else index.push(entry);
-      store.put(p, LESSON(id));
+      store.put(stored, LESSON(id));
       store.put(index, LIB_INDEX);
       store.put(opts.touchLast === false ? meta : { ...meta, lastLessonId: id }, LIB_META);
     });
