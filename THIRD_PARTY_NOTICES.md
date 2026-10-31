@@ -52,6 +52,7 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 | perfect-freehand | 애플 펜슬 필압 선 | MIT |
 | hwp-convert | 노트를 한글(hwpx)로 내보내기 | MIT |
 | docx | 노트를 워드(docx)로 내보내기 | MIT |
+| @hyunbinseo/holidays-kr | 달력의 공휴일·대체공휴일 (우주항공청 월력요항) | MIT |
 
 ## 악보 기능
 

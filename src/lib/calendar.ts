@@ -1,35 +1,21 @@
 /**
  * 노트에 넣는 달력 (월간·주간) — 우리나라 공휴일 표시
- *  - 2026년 공휴일·대체공휴일·임시공휴일은 선생님의 일정 앱(edu-scheduler-premium) 표를 그대로 쓴다.
- *  - 다른 해는 무료 공휴일 API(Nager.Date, 키 필요 없음)로 채우고 이 기기에 보관한다.
- *  - 인터넷이 안 되면 날짜가 정해진 국경일·공휴일만 표시한다.
+ *  - 공휴일·대체공휴일·임시공휴일: 우주항공청 월력요항(관보) 자료를 담은
+ *    @hyunbinseo/holidays-kr (MIT, 2018~2027년)를 앱에 넣어 쓴다. 인터넷이 없어도 된다.
+ *  - 자료가 없는 해는 날짜가 정해진 국경일·공휴일만 표시한다.
  */
+import { getHolidayPreset } from '@hyunbinseo/holidays-kr';
 
 export type HolidayMap = Record<string, string>; // '2026-10-03' → '개천절'
 
-const KR_HOLIDAYS_STATIC: HolidayMap = {
-  '2026-01-01': '신정',
-  '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴',
-  '2026-03-01': '삼일절', '2026-03-02': '대체공휴일(삼일절)',
-  '2026-05-05': '어린이날',
-  '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일(부처님오신날)',
-  '2026-06-03': '전국동시지방선거',
-  '2026-06-06': '현충일',
-  '2026-07-17': '제헌절',
-  '2026-08-15': '광복절', '2026-08-17': '대체공휴일(광복절)',
-  '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴',
-  '2026-10-03': '개천절', '2026-10-05': '대체공휴일(개천절)',
-  '2026-10-09': '한글날',
-  '2026-12-25': '성탄절',
-};
-const STATIC_YEARS = new Set([2026]);
-
-/** 날짜가 정해진 국경일·공휴일 (인터넷이 안 될 때) */
+/** 날짜가 정해진 국경일·공휴일 (자료가 없는 해) */
 const FIXED: [string, string][] = [
   ['01-01', '신정'], ['03-01', '삼일절'], ['05-05', '어린이날'], ['06-06', '현충일'], ['07-17', '제헌절'],
   ['08-15', '광복절'], ['10-03', '개천절'], ['10-09', '한글날'], ['12-25', '성탄절'],
 ];
-const NAME_KO: Record<string, string> = { 'Christmas Day': '성탄절', "New Year's Day": '신정' };
+/** 관보 이름 → 달력에 쓰는 이름 */
+const RENAME: [RegExp, string][] = [[/1월 1일/, '신정'], [/기독탄신일/, '성탄절'], [/3ㆍ1절/, '삼일절'], [/부처님 오신 날/, '부처님오신날']];
+const nice = (n: string) => RENAME.reduce((s, [re, to]) => s.replace(re, to), n);
 
 export const dkey = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
@@ -37,26 +23,13 @@ const fixedOf = (y: number): HolidayMap => Object.fromEntries(FIXED.filter(([md]
 
 const mem = new Map<number, Promise<HolidayMap>>();
 export function holidaysOf(y: number): Promise<HolidayMap> {
-  if (STATIC_YEARS.has(y)) return Promise.resolve(KR_HOLIDAYS_STATIC);
   let p = mem.get(y);
-  if (p) return p;
-  p = (async () => {
-    const key = `okssam_holidays_KR_${y}`;
-    try { const c = localStorage.getItem(key); if (c) return JSON.parse(c) as HolidayMap; } catch { /* 무시 */ }
-    try {
-      const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${y}/KR`);
-      if (!res.ok) throw new Error(String(res.status));
-      const list: { date: string; localName: string; name: string }[] = await res.json();
-      const map: HolidayMap = { ...fixedOf(y) };
-      for (const h of list) map[h.date] = map[h.date] || NAME_KO[h.name] || h.localName || h.name;
-      try { localStorage.setItem(key, JSON.stringify(map)); } catch { /* 무시 */ }
-      return map;
-    } catch {
-      mem.delete(y); // 다음에 다시 시도
-      return fixedOf(y);
-    }
-  })();
-  mem.set(y, p);
+  if (!p) {
+    p = getHolidayPreset(String(y))
+      .then(preset => Object.fromEntries(Object.entries(preset).map(([d, names]) => [d, names.map(nice).join('·')])) as HolidayMap)
+      .catch(() => fixedOf(y));
+    mem.set(y, p);
+  }
   return p;
 }
 
