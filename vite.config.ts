@@ -34,11 +34,14 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,png,jpg,svg,wasm,woff2,mjs}'],
+          // 한글 문서 엔진(약 12MB)은 처음 한글 파일을 넣을 때 받아 보관한다
+          globIgnores: ['**/rhwp_bg-*.wasm'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           navigateFallback: 'index.html',
           navigateFallbackDenylist: [/^\/__/],
           cleanupOutdatedCaches: true,
           runtimeCaching: [
+            { urlPattern: /\/assets\/rhwp_bg-[\w-]+\.wasm$/, handler: 'CacheFirst', options: { cacheName: 'hwp-engine', expiration: { maxEntries: 2 }, cacheableResponse: { statuses: [0, 200] } } },
             // 악기 소리(사운드폰트)와 글꼴은 한 번 받으면 보관
             { urlPattern: /^https:\/\/gleitz\.github\.io\//, handler: 'CacheFirst', options: { cacheName: 'soundfonts', expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 365 }, cacheableResponse: { statuses: [0, 200] } } },
             { urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/gh\/orioncactus\/pretendard/, handler: 'CacheFirst', options: { cacheName: 'fonts', expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 }, cacheableResponse: { statuses: [0, 200] } } },

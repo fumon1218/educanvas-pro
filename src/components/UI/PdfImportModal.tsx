@@ -10,6 +10,10 @@ interface PdfImportModalProps {
   onClose: () => void;
   onImport: (mode: PdfImportMode, from: number, to: number) => void;
   fileName?: string;
+  /** 문서 종류 (PDF, 한글 문서, 파워포인트 …) */
+  kind?: string;
+  /** 원본과 다를 수 있는 점 */
+  note?: string;
   numPages: number;
   preview?: string | null;
 }
@@ -23,7 +27,7 @@ const MODES: { id: PdfImportMode; icon: React.ElementType; title: string; desc: 
   { id: 'grid', icon: LayoutGrid, title: '지금 슬라이드에 나란히', desc: '사진처럼 나란히 놓고 자유롭게 옮깁니다.' },
 ];
 
-export const PdfImportModal: React.FC<PdfImportModalProps> = ({ isOpen, onClose, onImport, fileName, numPages, preview }) => {
+export const PdfImportModal: React.FC<PdfImportModalProps> = ({ isOpen, onClose, onImport, fileName, numPages, preview, kind, note }) => {
   const [mode, setMode] = useState<PdfImportMode>(() => {
     try { const v = localStorage.getItem(MODE_KEY); if (v === 'stack' || v === 'slides' || v === 'grid') return v; } catch { /* 무시 */ }
     return 'slides';
@@ -52,15 +56,16 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ isOpen, onClose,
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" />
           <motion.div
-            role="dialog" aria-modal="true" aria-label="PDF 넣기"
+            role="dialog" aria-modal="true" aria-label="문서 넣기"
             initial={{ opacity: 0, scale: 0.96, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 12 }}
             className="relative bg-white rounded-3xl shadow-2xl w-full max-w-[560px] overflow-hidden ring-1 ring-slate-900/5"
           >
             <div className="flex items-center gap-3 px-6 pt-6 pb-4">
               <div className="w-10 h-10 rounded-xl bg-red-50 text-red-500 flex items-center justify-center"><FileText size={22} /></div>
               <div className="flex-1 min-w-0">
-                <h2 className="text-lg font-bold text-slate-900">PDF 넣기</h2>
+                <h2 className="text-lg font-bold text-slate-900">{kind || 'PDF'} 넣기</h2>
                 <p className="text-xs text-slate-500 truncate">{fileName || '문서.pdf'} · 전체 {numPages}쪽</p>
+                {note && <p className="mt-1 text-[11.5px] leading-snug text-amber-700">{note}</p>}
               </div>
               <button onClick={onClose} aria-label="닫기" className="p-2 text-slate-400 hover:bg-slate-100 rounded-full"><X size={20} /></button>
             </div>

@@ -826,7 +826,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
           duration: 8000,
         });
       } else {
-        toast.error('지원하지 않는 파일 형식입니다.', { description: '이미지, PDF, 동영상, 오디오 파일을 넣을 수 있습니다.' });
+        toast.error('지원하지 않는 파일 형식입니다.', { description: '사진, PDF, 한글, 워드, 파워포인트, 엑셀, 키노트·페이지스·넘버스, 동영상, 소리, 악보 파일을 넣을 수 있습니다.' });
       }
     },
     addImages: handleImagesAdd,

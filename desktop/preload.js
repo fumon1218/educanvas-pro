@@ -5,4 +5,6 @@ contextBridge.exposeInMainWorld('okssamDesktop', {
   platform: process.platform,
   version: process.env.npm_package_version || '',
   openExternal: url => ipcRenderer.send('open-external', String(url)),
+  // 컴퓨터에 깔린 키노트·페이지스·넘버스·오피스로 문서를 PDF로 바꾼다
+  convertToPdf: (name, data) => ipcRenderer.invoke('convert-to-pdf', String(name), data),
 });
