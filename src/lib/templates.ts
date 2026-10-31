@@ -22,7 +22,7 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'grid', space: 'lesson', label: '모눈 공책', desc: '수학·도형 풀이용', paper: 'grid', name: d => `모눈 노트 · ${md(d)}` },
   { id: 'cornell', space: 'student', label: '코넬 공부 노트', desc: '왼쪽 키워드·질문, 오른쪽 필기, 아래 요약', paper: 'cornell', name: d => `공부 노트 · ${md(d)}` },
   { id: 'lined', space: 'student', label: '줄 공책', desc: '자유롭게 쓰는 공책', paper: 'lined', name: d => `공책 · ${md(d)}` },
-  { id: 'sermon', space: 'sermon', label: '설교 노트', desc: '본문·제목, 대지 1·2·3, 적용, 기도 제목', paper: 'sermon', name: d => `설교 노트 · ${md(d)}` },
+  { id: 'sermon', space: 'sermon', label: '설교 노트', desc: '날짜·설교자·예배·본문·제목 칸 + 자유롭게 쓰는 줄 공간', paper: 'sermon', name: d => `설교 노트 · ${md(d)}` },
   { id: 'lined', space: 'sermon', label: '줄 공책', desc: '자유 묵상·성경 공부', paper: 'lined', name: d => `묵상 노트 · ${md(d)}` },
   { id: 'meeting', space: 'work', label: '회의록', desc: '일시·참석자·안건, 논의, 결정 사항, 할 일', paper: 'meeting', name: d => `회의록 · ${md(d)}` },
   { id: 'worklog', space: 'work', label: '업무 일지', desc: '오늘 할 일, 한 일, 내일 할 일, 메모', paper: 'worklog', name: d => `업무 일지 · ${md(d)}` },
@@ -101,17 +101,13 @@ function layoutOf(style: PaperStyle, first: boolean): Layout {
           headerRow(c, y0 + 60, [{ t: '날짜', w: 0.34 }, { t: '설교자', w: 0.33 }, { t: '예배', w: 0.33 }]);
           headerRow(c, y0 + 134, [{ t: '본문', w: 1 }]);
           headerRow(c, y0 + 208, [{ t: '제목', w: 1 }]);
-          section(c, '대지 1', 380, 280);
-          section(c, '대지 2', 680, 280);
-          section(c, '대지 3', 980, 260);
-          section(c, '적용 · 결단', 1260, 200, '#059669');
-          section(c, '기도 제목', 1480, 220, '#d97706');
+          // 아래는 자유롭게 쓰는 줄 공간 (대지·적용·기도 제목 칸 없음)
+          ruled(c, M, 330, PAPER_W - M, PAPER_H - 60, 56);
         },
         fields: [
           ...headerFields(y0 + 60, [{ t: '날짜', w: 0.34, key: 'date', ph: '' }, { t: '설교자', w: 0.33, key: 'preacher', ph: '설교자' }, { t: '예배', w: 0.33, key: 'service', ph: '주일 오전' }]),
           ...headerFields(y0 + 134, [{ t: '본문', w: 1, key: 'passage', ph: '예: 로마서 8:28-30' }]),
           ...headerFields(y0 + 208, [{ t: '제목', w: 1, key: 'title', ph: '설교 제목' }]),
-          { key: 'prayer', x: M + 10, y: 1530, w: W - 20, h: 160, ph: '', checklist: 'prayer' },
         ],
       };
     }
@@ -208,7 +204,7 @@ async function addPaper(sc: fabric.StaticCanvas | fabric.Canvas, style: PaperSty
       continue;
     }
     // 칸은 비워 둔다 (날짜만 오늘로). 펜으로 쓰거나, 선택 도구로 칸을 두 번 눌러 타자로 적는다
-    const isDate = f.key === 'date';
+    const isDate = f.key === 'date' && style !== 'sermon'; // 설교 노트는 날짜도 비워 둔다 (자유롭게 쓰기)
     const t = new fabric.Textbox(isDate ? todayText(date) : '', {
       left: left + f.x * k, top: top + f.y * k, width: f.w * k, originX: 'left', originY: 'top', fontSize: fs,
       fill: '#0f172a', fontFamily: KFONT,
