@@ -47,6 +47,7 @@ import { useMultiplayer, SyncData, CursorData } from './hooks/useMultiplayer';
 import { AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { isStaleChunkError, recoverFromStaleChunk } from './lib/appUpdate';
+import { DocImportError, isDocumentFile, type PageSource } from './lib/docImport';
 import { cn } from './lib/utils';
 import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
@@ -121,8 +122,8 @@ export default function App() {
   const windowsRef = useRef(windows);
   windowsRef.current = windows;
   const [assetsOpen, setAssetsOpen] = useState(false);
-  const [pendingPdf, setPendingPdf] = useState<{ name: string; numPages: number; preview: string | null } | null>(null);
-  const pdfDocRef = useRef<any>(null);
+  const [pendingPdf, setPendingPdf] = useState<{ name: string; numPages: number; preview: string | null; kind: string; note?: string } | null>(null);
+  const pdfDocRef = useRef<PageSource | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
 
   // ---------- 그리기 상태 ----------
@@ -904,36 +905,25 @@ export default function App() {
     publishStructure(removed);
   }, [captureCurrent, updateScenes, setActiveSceneId, publishStructure]);
 
-  /** PDF를 먼저 열어 쪽 수와 첫 쪽 미리보기를 보여 준다 */
+  /** 문서(PDF·한글·워드·파워포인트·엑셀·키노트 …)를 먼저 열어 쪽 수와 첫 쪽 미리보기를 보여 준다 */
   const openPdf = useCallback(async (file: File) => {
-    const toastId = toast.loading('PDF를 여는 중…');
+    const toastId = toast.loading('문서를 여는 중…');
     try {
-      const [pdfjs, worker] = await Promise.all([
-        import('pdfjs-dist'),
-        import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-      ]);
-      pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-      const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+      const { openDocument } = await import('./lib/docImport');
+      const src = await openDocument(file, msg => toast.loading(msg, { id: toastId }));
       let preview: string | null = null;
-      try {
-        const page = await doc.getPage(1);
-        const base = page.getViewport({ scale: 1 });
-        const vp = page.getViewport({ scale: 240 / base.width });
-        const c = document.createElement('canvas');
-        c.width = vp.width; c.height = vp.height;
-        const ctx = c.getContext('2d')!;
-        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-        await page.render({ canvasContext: ctx, viewport: vp } as any).promise;
-        preview = c.toDataURL('image/jpeg', 0.8);
-      } catch { /* 미리보기는 없어도 된다 */ }
+      try { preview = await src.render(1, 240); } catch { /* 미리보기는 없어도 된다 */ }
       toast.dismiss(toastId);
       pdfDocRef.current?.destroy?.();
-      pdfDocRef.current = doc;
-      setPendingPdf({ name: file.name, numPages: doc.numPages, preview });
-    } catch (err) {
+      pdfDocRef.current = src;
+      setPendingPdf({ name: file.name, numPages: src.numPages, preview, kind: src.kind, note: src.note });
+    } catch (err: any) {
       console.error(err);
       if (isStaleChunkError(err)) { toast.dismiss(toastId); void recoverFromStaleChunk(); return; }
-      toast.error('PDF를 열지 못했습니다.', { id: toastId, description: '암호가 걸려 있거나 손상된 파일일 수 있습니다.' });
+      toast.error(err instanceof DocImportError ? err.message : '문서를 열지 못했습니다.', {
+        id: toastId, duration: 9000,
+        description: err?.hint || '암호가 걸려 있거나 손상된 파일일 수 있습니다. PDF로 저장해 넣으면 확실합니다.',
+      });
     }
   }, []);
 
@@ -949,25 +939,14 @@ export default function App() {
     if (!doc || !info) return;
     setPendingPdf(null);
     const count = to - from + 1;
-    const toastId = toast.loading('PDF 쪽을 그림으로 바꾸는 중…');
+    const toastId = toast.loading('쪽을 그림으로 바꾸는 중…');
     try {
       const pages: string[] = [];
       for (let i = from; i <= to; i++) {
-        toast.loading(`PDF 쪽 변환 중… (${i - from + 1}/${count})`, { id: toastId });
-        const page = await doc.getPage(i);
-        const base = page.getViewport({ scale: 1 });
-        const viewport = page.getViewport({ scale: Math.min(2.2, 1700 / base.width) });
-        const c = document.createElement('canvas');
-        c.width = viewport.width;
-        c.height = viewport.height;
-        const ctx = c.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, c.width, c.height);
-        await page.render({ canvasContext: ctx, viewport } as any).promise;
-        pages.push(c.toDataURL('image/jpeg', 0.85));
-        page.cleanup();
+        toast.loading(`${info.kind} 쪽 변환 중… (${i - from + 1}/${count})`, { id: toastId });
+        pages.push(await doc.render(i, 1700));
       }
-      const baseName = info.name.replace(/\.pdf$/i, '');
+      const baseName = info.name.replace(/\.[a-z0-9]+$/i, '');
       const range = count === 1 ? `${from}쪽` : `${from}~${to}쪽`;
       if (mode === 'grid') {
         await whiteboardRef.current?.addImages(pages);
@@ -991,7 +970,7 @@ export default function App() {
       toast.success(`슬라이드 ${created.length}장을 만들었습니다.`, { id: toastId });
     } catch (err) {
       console.error(err);
-      toast.error('PDF를 넣지 못했습니다.', { id: toastId, description: '쪽 수가 많으면 범위를 나누어 넣어 주세요.' });
+      toast.error('문서를 넣지 못했습니다.', { id: toastId, description: '쪽 수가 많으면 범위를 나누어 넣어 주세요.' });
     } finally {
       pdfDocRef.current?.destroy?.();
       pdfDocRef.current = null;
@@ -1154,7 +1133,7 @@ export default function App() {
   const routeFile = useCallback(async (file: File) => {
     const name = file.name.toLowerCase();
     const isScoreFileName = (n: string) => /\.(nwc|nwctxt|mid|midi|musicxml|mxl|xml)$/i.test(n);
-    if (file.type === 'application/pdf' || name.endsWith('.pdf')) {
+    if (isDocumentFile(file)) {
       openPdf(file);
     } else if (name.endsWith('.glb')) {
       handleModelFiles([file]);
@@ -1840,6 +1819,8 @@ export default function App() {
         fileName={pendingPdf?.name}
         numPages={pendingPdf?.numPages ?? 1}
         preview={pendingPdf?.preview}
+        kind={pendingPdf?.kind}
+        note={pendingPdf?.note}
       />
 
       <ConfirmDialog state={confirmState} onClose={() => setConfirmState(null)} />

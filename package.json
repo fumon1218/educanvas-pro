@@ -1,7 +1,7 @@
 {
   "name": "okssam-board",
   "private": true,
-  "version": "0.8.3",
+  "version": "0.9.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -12,24 +12,31 @@
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
+    "@rhwp/core": "^0.8.7",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "cfb": "^1.2.2",
     "clsx": "^2.1.1",
+    "docx-preview": "^0.4.1",
     "fabric": "^7.2.0",
     "firebase": "^12.12.0",
     "fix-webm-duration": "^1.0.6",
+    "html-to-image": "^1.11.13",
     "jspdf": "^4.2.0",
+    "jszip": "^3.10.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pdfjs-dist": "^4.10.38",
     "peerjs": "^1.5.4",
+    "pptx-preview": "^1.0.7",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-colorful": "^5.6.1",
     "react-dom": "^19.0.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
-    "three": "^0.170.0"
+    "three": "^0.170.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

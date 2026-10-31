@@ -36,6 +36,20 @@ Unless required by applicable law or agreed to in writing, software distributed 
 Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
 Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
 
+## 문서 불러오기 (v0.9.0~)
+
+문서를 쪽 그림으로 바꾸는 데 아래 라이브러리를 씁니다. 모두 사용자의 브라우저 안에서만 동작합니다.
+
+| 라이브러리 | 용도 | 라이선스 |
+|---|---|---|
+| @rhwp/core (edwardkim/rhwp) | 한글 hwp·hwpx 그리기 | MIT |
+| docx-preview | 워드 docx 그리기 | Apache-2.0 |
+| pptx-preview | 파워포인트 pptx 그리기 | ISC (npm 배포본, 무료 상업 사용 허용) |
+| SheetJS (xlsx) | 엑셀·넘버스·CSV 읽기 | Apache-2.0 |
+| cfb | 옛 워드 .doc 읽기 | Apache-2.0 |
+| html-to-image | 문서 화면을 그림으로 | MIT |
+| JSZip | 키노트·페이지스 파일 열기 | MIT (MIT 또는 GPL-3.0 중 MIT 선택) |
+
 ## 악보 기능
 
 `src/music/` 폴더의 악보 해석·연주 코드는 제작자가 직접 만든 사보앱(sheet-music-app)에서 옮겨 온 것입니다.

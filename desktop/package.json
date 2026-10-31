@@ -1,7 +1,7 @@
 {
   "name": "okssam-board-desktop",
   "productName": "옥쌤보드",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "옥쌤보드 데스크톱: 수업 창 안에서 모든 웹사이트(네이버·다음 등)를 여는 설치형 프로그램",
   "main": "main.js",
   "author": "옥쌤",
@@ -27,6 +27,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "convert.js",
       "package.json"
     ],
     "afterPack": "./adhoc-sign.js",
@@ -44,8 +45,7 @@
       "identity": null,
       "hardenedRuntime": false,
       "extendInfo": {
-        "NSCameraUsageDescription": "수업 녹화와 카메라 화면에 카메라를 씁니다.",
-        "NSMicrophoneUsageDescription": "수업 녹화에 마이크를 씁니다."
+        "NSAppleEventsUsageDescription": "키노트·페이지스·넘버스 파일을 수업 슬라이드로 넣기 위해 그 앱으로 PDF를 만듭니다."
       }
     },
     "dmg": {

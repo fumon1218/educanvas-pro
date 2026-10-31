@@ -1,3 +1,4 @@
+import { DOC_ACCEPT } from '@/src/lib/docImport';
 import React, { useState } from 'react';
 import {
   Pencil, Pen, Feather, Minus, Eraser, Zap, MousePointer2, Circle, Square, Triangle as TriangleIcon, Shapes, Type,
@@ -117,7 +118,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     media: {
       title: '자료 넣기',
       items: [
-        { id: 'upload', icon: Upload, label: '파일 넣기', hint: '사진·PDF·영상·소리·GLB·악보', action: () => fileInputRef.current?.click() },
+        { id: 'upload', icon: Upload, label: '파일 넣기', hint: '사진·PDF·한글·워드·PPT·엑셀·키노트·영상·악보', action: () => fileInputRef.current?.click() },
         { id: 'webwin', icon: Globe, label: '웹 브라우저', hint: '유튜브·구글 문서', action: () => onOpenWebWindow?.() },
         { id: 'assets', icon: Box, label: '3D 자산함', hint: 'GLB 모델 모음', action: () => onOpenAssets?.() },
         { id: 'score', icon: Music, label: '악보', hint: 'NWC·MIDI·MusicXML', action: () => fileInputRef.current?.click() },
@@ -171,7 +172,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept="image/*,video/*,audio/*,.pdf,.ppt,.pptx,.glb,.nwc,.nwctxt,.mid,.midi,.musicxml,.xml,.mxl"
+        accept={`image/*,video/*,audio/*,${DOC_ACCEPT},.glb,.nwc,.nwctxt,.mid,.midi,.musicxml,.xml,.mxl`}
         onChange={e => {
           const file = e.target.files?.[0];
           if (file) onAddFile(file);

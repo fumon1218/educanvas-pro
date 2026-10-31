@@ -70,6 +70,14 @@ app.on('web-contents-created', (_e, contents) => {
   });
 });
 
+// 문서 → PDF (키노트·페이지스·넘버스·오피스·LibreOffice). 옥쌤보드 화면에서 온 요청만 받는다
+const { convertToPdf } = require('./convert');
+ipcMain.handle('convert-to-pdf', async (e, name, data) => {
+  try { if (new URL(e.senderFrame.url).origin !== APP_ORIGIN) return { ok: false, error: 'origin' }; } catch { return { ok: false, error: 'origin' }; }
+  if (!(data instanceof ArrayBuffer || ArrayBuffer.isView(data)) || data.byteLength > 300 * 1024 * 1024) return { ok: false, error: 'bad data' };
+  return convertToPdf(String(name || ''), data);
+});
+
 ipcMain.on('open-external', (_e, url) => { if (/^https?:/i.test(url)) shell.openExternal(url); });
 
 app.whenReady().then(() => {
