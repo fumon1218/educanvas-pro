@@ -13,8 +13,9 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       // 설치형 앱(PWA): 한 번 열어 두면 인터넷이 불안해도 앱 화면이 바로 열린다
       VitePWA({
-        registerType: 'autoUpdate',
-        injectRegister: 'auto',
+        // 새 버전은 선생님이 [새 버전으로 바꾸기]를 누를 때 바꾼다 (수업 중에 화면이 바뀌지 않게)
+        registerType: 'prompt',
+        injectRegister: false,
         includeAssets: ['favicon-32.png', 'apple-touch-icon.png'],
         manifest: {
           name: '옥쌤보드',
