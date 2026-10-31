@@ -165,7 +165,7 @@ export const BibleHost: React.FC = () => {
                 {hasRuby && (
                   <span className="flex items-center gap-1.5">
                     한자 읽는 법
-                    {([['over', '위에 작게'], ['paren', '괄호로']] as const).map(([k, l]) => (
+                    {([['paren', '괄호로 (글자)'], ['over', '위에 작게 (그림)']] as const).map(([k, l]) => (
                       <button key={k} type="button" onClick={() => savePref({ ...pref, ruby: k })} aria-pressed={pref.ruby === k}
                         className={cn('h-7 px-2.5 rounded-lg ring-1', pref.ruby === k ? 'bg-slate-800 text-white ring-slate-800' : 'ring-slate-200 hover:bg-slate-50')}>{l}</button>
                     ))}
@@ -186,7 +186,7 @@ export const BibleHost: React.FC = () => {
               </div>
               {hasRuby && (
                 <p className="text-[12px] text-slate-500 -mt-1">
-                  {pref.ruby === 'over' ? '카드가 그림으로 들어갑니다. 카드를 두 번 누르면 太初(태초)처럼 괄호 글로 바뀌어 글자를 고칠 수 있습니다.' : '太初(태초)처럼 괄호로 넣습니다. 바로 글자를 고칠 수 있습니다.'}
+                  {pref.ruby === 'over' ? '카드가 그림으로 들어갑니다. 글자 크기·색을 바꾸려면 카드를 고른 뒤 [글자로 바꾸기]를 누르세요.' : '太初(태초)처럼 괄호로 넣습니다. 글자를 고치고, 크기·굵기·색·바탕도 바꿀 수 있습니다.'}
                 </p>
               )}
 

@@ -114,6 +114,8 @@ export interface WhiteboardHandle {
   /** 화면 가운데에 할 일·기도 제목 목록 넣기 */
   addChecklist: (kind: 'todo' | 'prayer') => void;
   /** 성경 구절 카드 넣기 */
+  /** 그림(달력 등)을 화면 가운데에 놓는다. 공책이면 쪽 너비에 맞춤 */
+  addPlacedImage: (url: string, w: number, props?: Record<string, any>) => Promise<void>;
   /** 성경 구절 카드: image가 있으면 읽는 법을 단 그림 카드(두 번 누르면 text로 바뀜), 없으면 글 상자 */
   addBibleCard: (card: { ref: string; text: string; bg?: string; image?: { url: string; w: number; h: number } }) => Promise<void>;
   /** 체크 목록의 한 줄 체크/해제 */
@@ -223,6 +225,8 @@ function selectionOf(target: any): MediaSelection {
   return { type: 'none' };
 }
 
+const isTextObj = (x: any): boolean => x instanceof fabric.IText;
+
 function isLocked(obj: fabric.FabricObject) {
   return !!(obj as any).locked;
 }
@@ -275,6 +279,57 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   /** 선택 도구로 바뀐 직후 선택할 객체들 (도구 전환과 선택 사이의 순서 문제 방지) */
   const pendingSelectRef = useRef<fabric.FabricObject[] | null>(null);
   const [hasSelection, setHasSelection] = useState(false);
+  const readTextSel = () => {
+    const a: any = fabricRef.current?.getActiveObject();
+    if (a && a.type === 'image' && a.bibleText) { setTextSel({ size: 0, bold: false, bible: true, bg: a.bibleBg || 'yellow', bibleImage: true }); return; }
+    if (!a || !isTextObj(a)) { setTextSel(null); return; }
+    setTextSel({ size: Math.round(a.fontSize), bold: a.fontWeight === 'bold' || a.fontWeight === 700, bible: !!a.bibleText, bg: a.bibleBg || 'yellow' });
+  };
+  /** 글자 모양 바꾸기: 글을 고르는 중이면 고른 글자만, 아니면 상자 전체 */
+  const styleText = (patch: { grow?: number; bold?: boolean; fill?: string; bg?: string }) => {
+    const canvas = fabricRef.current;
+    const o: any = canvas?.getActiveObject();
+    if (!canvas || !o) return;
+    if (o.type === 'image' && o.bibleText) return;
+    if (!isTextObj(o)) return;
+    const partial = o.isEditing && o.selectionStart !== o.selectionEnd;
+    if (patch.grow) {
+      const next = Math.max(8, Math.min(200, Math.round(o.fontSize * patch.grow)));
+      if (partial) {
+        const cur = o.getSelectionStyles()[0]?.fontSize || o.fontSize;
+        o.setSelectionStyles({ fontSize: Math.max(6, Math.round(cur * patch.grow)) });
+      } else {
+        const f = next / o.fontSize;
+        o.set({ fontSize: next });
+        // 머리 줄처럼 따로 정한 크기도 같은 비율로
+        for (const line of Object.values<any>(o.styles || {})) for (const ch of Object.values<any>(line)) if (ch.fontSize) ch.fontSize = Math.max(6, Math.round(ch.fontSize * f));
+      }
+    }
+    if (patch.bold != null) { if (partial) o.setSelectionStyles({ fontWeight: patch.bold ? 'bold' : 'normal' }); else o.set({ fontWeight: patch.bold ? 'bold' : 'normal' }); }
+    if (patch.fill) { if (partial) o.setSelectionStyles({ fill: patch.fill }); else o.set({ fill: patch.fill }); }
+    if (patch.bg) { o.set({ backgroundColor: ({ yellow: '#fef3c7', white: '#ffffff', none: '' } as any)[patch.bg] ?? '' }); o.bibleBg = patch.bg; }
+    o.initDimensions?.(); o.setCoords();
+    canvas.requestRenderAll();
+    commitChange();
+    readTextSel();
+  };
+  /** 읽는 법을 단 성경 그림 카드 → 고칠 수 있는 글 */
+  const bibleImageToText = (bt: any) => {
+    const canvas = fabricRef.current;
+    if (!canvas || !bt) return;
+    const t = makeBibleTextbox(bt.bibleText, bt.left, bt.top, bt.getScaledWidth(), bt.bibleBg);
+    Object.assign(t as any, { id: newId(), bibleRef: bt.bibleRef, bibleText: bt.bibleText, bibleBg: bt.bibleBg });
+    const idx = canvas.getObjects().indexOf(bt);
+    canvas.remove(bt);
+    canvas.insertAt(idx, t);
+    canvas.setActiveObject(t);
+    canvas.requestRenderAll();
+    commitChange();
+    readTextSel();
+    return t;
+  };
+  /** 고른 글 상자의 모양 (글자 크기·굵게·바탕 막대에 씀) */
+  const [textSel, setTextSel] = useState<{ size: number; bold: boolean; bible: boolean; bg: string; bibleImage?: boolean } | null>(null);
   const [isGroupSelected, setIsGroupSelected] = useState(false);
   const [canGroup, setCanGroup] = useState(false);
   const [, forceRender] = useState(0);
@@ -1030,6 +1085,21 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       (t as fabric.Textbox).selectionStart = (t as fabric.Textbox).selectionEnd = 2;
       canvas.requestRenderAll();
     },
+    addPlacedImage: async (url, w, props) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const z = canvas.getZoom();
+      const c = canvas.getVpCenter();
+      const img = await fabric.FabricImage.fromURL(url);
+      const vw = (canvas.width / z) * 0.85, vh = (canvas.height / z) * 0.85;
+      const sc = Math.min(w, vw, vh * (img.width / img.height)) / img.width;
+      img.set({ left: c.x - (img.width * sc) / 2, top: c.y - (img.height * sc) / 2, originX: 'left', originY: 'top', scaleX: sc, scaleY: sc });
+      Object.assign(img as any, { id: newId(), ...(props || {}) });
+      canvas.add(img);
+      canvas.setActiveObject(img);
+      canvas.requestRenderAll();
+      commitChange();
+    },
     addBibleCard: async (card) => {
       const canvas = fabricRef.current;
       if (!canvas) return;
@@ -1315,6 +1385,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       setCanGroup(active instanceof fabric.ActiveSelection);
       setIsGroupSelected(!!active && active instanceof fabric.Group && !(active instanceof fabric.ActiveSelection) && !(active as any).isAudio && !(active as any).isWebLink);
       const target: any = canvas.getActiveObjects()[0];
+      readTextSel();
       const cb = propsRef.current.onSelectionChange;
       if (!cb) return;
       cb(selectionOf(target));
@@ -1326,15 +1397,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       // 읽는 법을 단 성경 카드 → 고칠 수 있는 글(괄호 방식)로
       const bt: any = opt.target;
       if (bt && bt.type === 'image' && bt.bibleText && !bt.locked) {
-        const t = makeBibleTextbox(bt.bibleText, bt.left, bt.top, bt.getScaledWidth(), bt.bibleBg);
-        Object.assign(t as any, { id: newId(), bibleRef: bt.bibleRef, bibleText: bt.bibleText, bibleBg: bt.bibleBg });
-        const idx = canvas.getObjects().indexOf(bt);
-        canvas.remove(bt);
-        canvas.insertAt(idx, t);
-        canvas.setActiveObject(t);
-        t.enterEditing();
-        canvas.requestRenderAll();
-        commitChange();
+        bibleImageToText(bt)?.enterEditing();
         return;
       }
       const sel = selectionOf(opt.target);
@@ -1987,7 +2050,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
 
       {/* 선택한 객체용 작업 막대 */}
       {hasSelection && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 bg-white/95 backdrop-blur-xl p-1.5 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_8px_24px_-8px_rgba(15,23,42,0.25)]">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2">
+        <div className="flex items-center gap-1 bg-white/95 backdrop-blur-xl p-1.5 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_8px_24px_-8px_rgba(15,23,42,0.25)]">
           <ActionButton onClick={handleCopy} title="복사 (Ctrl+C)">
             <rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
           </ActionButton>
@@ -2009,10 +2073,51 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
             <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
           </ActionButton>
         </div>
+        {textSel && (
+          <div className="flex flex-wrap justify-center items-center gap-1 bg-white/95 backdrop-blur-xl p-1.5 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_8px_24px_-8px_rgba(15,23,42,0.25)] max-w-[92vw]">
+            <TextStyleControls sel={textSel} onStyle={styleText} onToText={() => bibleImageToText(fabricRef.current?.getActiveObject())} />
+          </div>
+        )}
+        </div>
       )}
     </div>
   );
 }));
+
+/** 글 상자 모양: 글자 크기 · 굵게 · 글자 색 · (성경 카드) 바탕 */
+const TEXT_COLORS = ['#1e293b', '#dc2626', '#2563eb', '#16a34a', '#92400e', '#64748b'];
+const TextStyleControls: React.FC<{
+  sel: { size: number; bold: boolean; bible: boolean; bg: string; bibleImage?: boolean };
+  onStyle: (p: { grow?: number; bold?: boolean; fill?: string; bg?: string }) => void;
+  onToText: () => void;
+}> = ({ sel, onStyle, onToText }) => {
+  // 글을 고르는 중에 눌러도 선택(커서)이 풀리지 않게
+  const keep = (e: React.PointerEvent | React.MouseEvent) => e.preventDefault();
+  const btn = 'h-10 min-w-10 px-2 flex items-center justify-center rounded-xl text-gray-600 hover:bg-gray-100 text-[13px] font-semibold';
+  if (sel.bibleImage) {
+    return (<><button onMouseDown={keep} onClick={onToText} className={btn} title="글자로 바꾸기 (크기·색·바탕을 바꿀 수 있게)">글자로 바꾸기</button></>);
+  }
+  return (
+    <>
+      <button onMouseDown={keep} onClick={() => onStyle({ grow: 1 / 1.15 })} className={btn} title="글자 작게" aria-label="글자 작게">가<sub className="text-[9px]">−</sub></button>
+      <span className="text-[12px] tabular-nums text-gray-500 w-7 text-center" aria-label="글자 크기">{sel.size}</span>
+      <button onMouseDown={keep} onClick={() => onStyle({ grow: 1.15 })} className={btn} title="글자 크게" aria-label="글자 크게"><span className="text-[17px]">가</span><sub className="text-[9px]">+</sub></button>
+      <button onMouseDown={keep} onClick={() => onStyle({ bold: !sel.bold })} className={cn(btn, sel.bold && 'bg-gray-100 text-gray-900')} title="굵게" aria-label="굵게" aria-pressed={sel.bold}><b>B</b></button>
+      <div className="flex items-center gap-1 px-1">
+        {TEXT_COLORS.map(c => <button key={c} onMouseDown={keep} onClick={() => onStyle({ fill: c })} className="w-5 h-5 rounded-full ring-1 ring-black/10" style={{ background: c }} title="글자 색" aria-label={`글자 색 ${c}`} />)}
+      </div>
+      {sel.bible && (
+        <div className="flex items-center gap-1 pl-1">
+          {([['yellow', '#fef3c7', '노랑'], ['white', '#ffffff', '흰색'], ['none', '', '투명']] as const).map(([k, c, l]) => (
+            <button key={k} onMouseDown={keep} onClick={() => onStyle({ bg: k })} title={`바탕 ${l}`} aria-label={`바탕 ${l}`} aria-pressed={sel.bg === k}
+              className={cn('w-6 h-6 rounded-md ring-1', sel.bg === k ? 'ring-2 ring-slate-800' : 'ring-slate-300')}
+              style={c ? { background: c } : { backgroundImage: 'conic-gradient(#e2e8f0 25%,#fff 0 50%,#e2e8f0 0 75%,#fff 0)', backgroundSize: '8px 8px' }} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+};
 
 const ActionButton: React.FC<{ onClick: () => void; title: string; danger?: boolean; children: React.ReactNode }> = ({ onClick, title, danger, children }) => (
   <button

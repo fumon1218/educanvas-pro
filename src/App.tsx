@@ -20,6 +20,7 @@ import { LessonHistoryModal } from './components/UI/LessonHistoryModal';
 import { LessonDashboard } from './components/UI/LessonDashboard';
 import { PromptHost, askText } from './components/UI/PromptHost';
 import { BibleHost, pickBible } from './components/UI/BiblePicker';
+import { CalendarHost, pickCalendar } from './components/UI/CalendarPicker';
 import { buildTemplateScene, type TemplateDef } from './lib/templates';
 import { checkItemsOf, setCheckInData, type CheckItem } from './lib/noteOps';
 import { ClipSaveModal, StudyLogModal, FocusChip, FlashReviewBar, type FocusState } from './components/Study/StudyTools';
@@ -1090,11 +1091,18 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [captureCurrent, updateScenes]);
 
-  const handleNoteTool = useCallback(async (kind: 'todo' | 'prayer' | 'bible' | 'page') => {
+  const handleNoteTool = useCallback(async (kind: 'todo' | 'prayer' | 'bible' | 'page' | 'calendar') => {
     if (kind === 'page') {
       const n = await whiteboardRef.current?.appendNotebookPage();
       if (n == null) toast.info('공책 쪽은 양식으로 만든 노트에서 늘릴 수 있습니다.', { description: '[내 노트 → 새 노트 → 줄 공책·설교 노트·회의록 …]' });
       else toast.success(`${n}쪽을 더했습니다.`);
+      return;
+    }
+    if (kind === 'calendar') {
+      const img = await pickCalendar();
+      if (!img) return;
+      await whiteboardRef.current?.addPlacedImage(img.url, img.w, { calendar: img.label });
+      toast.success(`${img.label}을(를) 넣었습니다.`, { description: '칸에 펜이나 글로 적으세요. 달력은 움직이거나 크기를 바꿀 수 있습니다.' });
       return;
     }
     if (kind === 'bible') {
@@ -1103,7 +1111,7 @@ export default function App() {
       const card = await pickBible(field || undefined);
       if (!card) return;
       await whiteboardRef.current?.addBibleCard(card);
-      toast.success(`'${card.ref}' 카드를 넣었습니다.`, card.image ? { description: '카드를 두 번 누르면 괄호 글로 바뀌어 글자를 고칠 수 있습니다.', duration: 7000 } : undefined);
+      toast.success(`'${card.ref}' 카드를 넣었습니다.`, { description: card.image ? '카드를 고른 뒤 [글자로 바꾸기](또는 두 번 누르기)를 하면 글자를 고칠 수 있습니다.' : '카드를 고르면 위쪽 막대에서 글자 크기·굵기·색·바탕을 바꿀 수 있습니다.', duration: 7000 });
       return;
     }
     whiteboardRef.current?.addChecklist(kind);
@@ -2125,6 +2133,7 @@ export default function App() {
 
       <PromptHost />
       <BibleHost />
+      <CalendarHost />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard
         isOpen={lessonsOpen}

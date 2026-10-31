@@ -166,10 +166,16 @@ export const refLabel = (bookName: string, r: VerseRange) =>
 // ---------------------------------------------------------------------------
 
 const PREF = 'okssam_bible_pref';
+/** 0.12.2부터 기본은 고칠 수 있는 글(괄호). 예전에 저장한 '위에 작게'는 한 번만 글로 바꾼다 */
+const PREF_V = 2;
 export type CardBg = 'yellow' | 'white' | 'none';
 export interface BiblePref { versions: string[]; ruby: 'over' | 'paren'; numbers: boolean; bg: CardBg }
 export const getBiblePref = (): BiblePref => {
-  try { return { versions: ['KRV'], ruby: 'over', numbers: true, bg: 'yellow', ...JSON.parse(localStorage.getItem(PREF) || '{}') }; }
-  catch { return { versions: ['KRV'], ruby: 'over', numbers: true, bg: 'yellow' }; }
+  try {
+    const saved = JSON.parse(localStorage.getItem(PREF) || '{}');
+    if (saved.v !== PREF_V) delete saved.ruby;
+    return { versions: ['KRV'], ruby: 'paren', numbers: true, bg: 'yellow', ...saved };
+  }
+  catch { return { versions: ['KRV'], ruby: 'paren', numbers: true, bg: 'yellow' }; }
 };
-export const setBiblePref = (p: BiblePref) => { try { localStorage.setItem(PREF, JSON.stringify(p)); } catch { /* 무시 */ } };
+export const setBiblePref = (p: BiblePref) => { try { localStorage.setItem(PREF, JSON.stringify({ ...p, v: PREF_V })); } catch { /* 무시 */ } };
