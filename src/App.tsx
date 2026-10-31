@@ -57,6 +57,7 @@ import { Toaster, toast } from 'sonner';
 import { isStaleChunkError, recoverFromStaleChunk } from './lib/appUpdate';
 import { TEST_MODE } from './lib/testMode';
 import { DocImportError, isDocumentFile, type PageSource } from './lib/docImport';
+import { importExplain, isExplainFile } from './lib/explainImport';
 import { saveDoc } from './lib/hdRender';
 import { cn } from './lib/utils';
 import { db, auth, signInWithGoogle } from './firebase';
@@ -1450,10 +1451,32 @@ export default function App() {
     }
   }, []);
 
+  /** Explain Everything 프로젝트 → 새 노트 (지금 노트는 그대로 저장해 둔다) */
+  const openExplain = async (file: File) => {
+    const toastId = toast.loading('Explain Everything 파일을 여는 중…');
+    try {
+      if (dirtyRef.current) await saveRef.current(false);
+      const r = await importExplain(file, s => toast.loading(s, { id: toastId }));
+      if (!r.scenes.length) throw new Error('장면이 없습니다.');
+      const now = new Date();
+      const scenes = r.scenes.map(s => ({ id: newId(), name: s.name.slice(0, 100), data: s.data }));
+      applyProject({ format: 'educanvas-project', version: 1, name: r.name, savedAt: now.toISOString(), activeSceneId: scenes[0].id, canvasBackground: 'blank', scenes }, { publish: true });
+      lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null, space: 'lesson', noteDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}` };
+      markDirty();
+      setTimeout(() => whiteboardRef.current?.fitToContent(), 600);
+      toast.success(`'${r.name}'을(를) 새 노트로 열었습니다.`, { id: toastId, description: `장면 ${scenes.length}개${r.skipped ? ` · 옮기지 못한 개체 ${r.skipped}개` : ''}. 녹화(소리·움직임)는 가져오지 않습니다.`, duration: 8000 });
+    } catch (e: any) {
+      console.error(e);
+      toast.error('Explain Everything 파일을 열지 못했습니다.', { id: toastId, description: e?.message });
+    }
+  };
+
   const routeFile = useCallback(async (file: File) => {
     const name = file.name.toLowerCase();
     const isScoreFileName = (n: string) => /\.(nwc|nwctxt|mid|midi|musicxml|mxl|xml)$/i.test(n);
-    if (isDocumentFile(file)) {
+    if (isExplainFile(file)) {
+      openExplain(file);
+    } else if (isDocumentFile(file)) {
       openPdf(file);
     } else if (name.endsWith('.glb')) {
       handleModelFiles([file]);
@@ -1462,6 +1485,7 @@ export default function App() {
     } else {
       whiteboardRef.current?.addFile(file);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleModelFiles, handleScoreFile, openPdf]);
 
   // 파일을 화면에 끌어다 놓아도 넣을 수 있게
