@@ -110,14 +110,14 @@ async function upload(token: string, meta: Record<string, unknown>, body: Blob, 
 }
 
 // ---------- 수업 ----------
-export interface DriveLesson { id: string; name: string; modifiedTime: string; size?: number; lessonId?: string; slides?: number; thumb?: string }
+export interface DriveLesson { id: string; name: string; modifiedTime: string; size?: number; lessonId?: string; category?: string; slides?: number; thumb?: string }
 
 export async function listLessons(token: string): Promise<DriveLesson[]> {
   const fields = 'files(id,name,modifiedTime,size,appProperties)';
   const json = await (await call(token, `${API}/files?q=${q("appProperties has { key='okssam' and value='lesson' } and trashed=false")}&orderBy=modifiedTime desc&pageSize=200&fields=${q(fields)}&spaces=drive`)).json();
   return (json.files || []).map((f: any) => ({
     id: f.id, name: (f.name || '').replace(/\.okssam\.json$/, ''), modifiedTime: f.modifiedTime, size: f.size ? +f.size : undefined,
-    lessonId: f.appProperties?.lessonId, slides: f.appProperties?.slides ? +f.appProperties.slides : undefined,
+    lessonId: f.appProperties?.lessonId, category: f.appProperties?.category, slides: f.appProperties?.slides ? +f.appProperties.slides : undefined,
   }));
 }
 
@@ -138,7 +138,7 @@ export async function saveLesson(token: string, project: StoredProject & { lesso
   const meta: Record<string, unknown> = {
     name: `${(project.name || '수업').replace(/[\\/]/g, ' ').slice(0, 80)}.okssam.json`,
     mimeType: 'application/json',
-    appProperties: { okssam: 'lesson', lessonId: project.lessonId, slides: String(project.scenes.length) },
+    appProperties: { okssam: 'lesson', lessonId: project.lessonId, slides: String(project.scenes.length), ...(project.category ? { category: project.category.slice(0, 40) } : {}) },
   };
   if (!fileId) meta.parents = [parent];
   try {

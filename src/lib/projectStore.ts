@@ -25,6 +25,8 @@ export interface StoredProject {
   /** 이 수업이 저장된 드라이브 파일과 그때의 수정 시각 */
   driveFileId?: string;
   driveModified?: string;
+  /** 분류 (예: '3학년 과학') */
+  category?: string;
   /** 내보낸 파일에만: 함께 담은 3D 모델 */
   assets?: { models: PackedModel[] };
 }
@@ -48,14 +50,207 @@ function openDB(): Promise<IDBDatabase> {
 export const legacyLessonId = (p: { savedAt?: string }) => 'legacy-' + (p.savedAt || '');
 const lessonOf = (p: StoredProject) => p.lessonId || legacyLessonId(p);
 
-const hasContent = (p: StoredProject | null | undefined) =>
+export const hasContent = (p: StoredProject | null | undefined) =>
   !!p?.scenes?.some(s => { try { return !!s.data && JSON.parse(s.data).objects?.length > 0; } catch { return false; } });
 
+const reqP = <T,>(r: IDBRequest<T>) => new Promise<T>((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+
+const runTx = (db: IDBDatabase, mode: IDBTransactionMode, fn: (store: IDBObjectStore) => Promise<void> | void) =>
+  new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, mode);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+    Promise.resolve(fn(tx.objectStore(STORE))).catch(err => { try { tx.abort(); } catch { /* 무시 */ } reject(err); });
+  });
+
+async function withDB<T>(fn: (db: IDBDatabase) => Promise<T>): Promise<T> {
+  const db = await openDB();
+  try { return await fn(db); } finally { db.close(); }
+}
+
+// ===========================================================================
+// 내 수업 (이 브라우저의 수업 서재)
+//  수업마다 따로 칸(lesson:<번호>)에 저장하고, 목록(library-index)에 이름·분류·썸네일을 둔다.
+// ===========================================================================
+
+export interface LibraryEntry {
+  id: string;
+  name: string;
+  savedAt: string;
+  createdAt: string;
+  slides: number;
+  thumb?: string;
+  category?: string;
+  favorite?: boolean;
+  /** 휴지통에 넣은 시각 (30일 뒤 완전히 지움) */
+  trashedAt?: string;
+  driveFileId?: string;
+}
+interface LibraryMeta { lastLessonId?: string; categories: string[] }
+
+const LESSON = (id: string) => `lesson:${id}`;
+const LIB_INDEX = 'library-index';
+const LIB_META = 'library-meta';
+const LEGACY_CURRENT = 'current';
+const LEGACY_PREV = 'previous';
+const TRASH_DAYS = 30;
+
+const entryOf = (p: StoredProject, prev?: LibraryEntry): LibraryEntry => ({
+  ...(prev || {}),
+  id: lessonOf(p),
+  name: p.name || '수업',
+  savedAt: p.savedAt,
+  createdAt: prev?.createdAt || p.savedAt,
+  slides: p.scenes?.length || 0,
+  thumb: p.scenes?.find(s => s.id === p.activeSceneId)?.thumbnail || p.scenes?.[0]?.thumbnail || prev?.thumb,
+  category: p.category ?? prev?.category,
+  driveFileId: p.driveFileId || prev?.driveFileId,
+});
+
+async function readLib(store: IDBObjectStore): Promise<{ index: LibraryEntry[]; meta: LibraryMeta }> {
+  const [i, m] = await Promise.all([reqP(store.get(LIB_INDEX)), reqP(store.get(LIB_META))]);
+  return { index: (i as LibraryEntry[]) || [], meta: { categories: [], ...((m as LibraryMeta) || {}) } };
+}
+
+/**
+ * 예전 방식(수업 칸 하나 'current' + 직전 수업 'previous')으로 저장된 수업을 서재로 옮긴다.
+ * 예전 버전 탭이 아직 열려 있어 'current'에 다시 쓸 수도 있으므로, 앱을 열 때마다 확인한다.
+ * 옮긴 뒤에는 예전 칸을 비운다(내용은 서재에 있음).
+ */
+async function migrate(db: IDBDatabase) {
+  await runTx(db, 'readwrite', async store => {
+    const { index, meta } = await readLib(store);
+    let changed = false;
+    for (const key of [LEGACY_PREV, LEGACY_CURRENT]) {
+      const p = (await reqP(store.get(key))) as StoredProject | undefined;
+      if (!p) continue;
+      if (hasContent(p)) {
+        const id = lessonOf(p);
+        const i = index.findIndex(e => e.id === id);
+        if (i < 0 || Date.parse(p.savedAt) > Date.parse(index[i].savedAt)) {
+          const fixed = { ...p, lessonId: id };
+          store.put(fixed, LESSON(id));
+          const entry = entryOf(fixed, i >= 0 ? index[i] : undefined);
+          if (i >= 0) index[i] = entry; else index.push(entry);
+          if (key === LEGACY_CURRENT) meta.lastLessonId = id;
+        }
+      }
+      store.delete(key);
+      changed = true;
+    }
+    // 30일 지난 휴지통 비우기
+    const now = Date.now();
+    const keep = index.filter(e => !(e.trashedAt && now - Date.parse(e.trashedAt) > TRASH_DAYS * 864e5));
+    if (keep.length !== index.length) { index.filter(e => !keep.includes(e)).forEach(e => store.delete(LESSON(e.id))); changed = true; }
+    if (changed) { store.put(keep, LIB_INDEX); store.put(meta, LIB_META); }
+  });
+}
+
+let migrated: Promise<void> | null = null;
+const ensureMigrated = (db: IDBDatabase) => (migrated ||= migrate(db).catch(e => { migrated = null; throw e; }));
+
+/** 지운 뒤 다시 정리 (휴지통 30일) 등 서재 목록 */
+export async function listLibrary(): Promise<{ lessons: LibraryEntry[]; categories: string[]; lastLessonId?: string }> {
+  return withDB(async db => {
+    await ensureMigrated(db);
+    let out!: { index: LibraryEntry[]; meta: LibraryMeta };
+    await runTx(db, 'readonly', async store => { out = await readLib(store); });
+    const cats = Array.from(new Set([...out.meta.categories, ...out.index.map(e => e.category).filter(Boolean) as string[]]));
+    return { lessons: out.index, categories: cats, lastLessonId: out.meta.lastLessonId };
+  });
+}
+
+export async function loadLesson(id: string): Promise<StoredProject | null> {
+  return withDB(async db => {
+    await ensureMigrated(db);
+    let p: StoredProject | undefined;
+    await runTx(db, 'readonly', async store => { p = (await reqP(store.get(LESSON(id)))) as StoredProject | undefined; });
+    return p ? { ...p, lessonId: id } : null;
+  });
+}
+
+/** 마지막으로 연 수업 (앱을 켜면 이어서 연다) */
+export async function loadProject(): Promise<StoredProject | null> {
+  const lib = await listLibrary();
+  const last = lib.lastLessonId && lib.lessons.find(e => e.id === lib.lastLessonId && !e.trashedAt);
+  return last ? loadLesson(last.id) : null;
+}
+
+/** 목록 정보 바꾸기 (이름·분류·즐겨찾기·휴지통). 이름·분류는 수업 파일에도 적는다 */
+export async function updateLesson(id: string, patch: Partial<Pick<LibraryEntry, 'name' | 'category' | 'favorite' | 'trashedAt'>>): Promise<void> {
+  await withDB(async db => {
+    await ensureMigrated(db);
+    await runTx(db, 'readwrite', async store => {
+      const { index, meta } = await readLib(store);
+      const e = index.find(x => x.id === id);
+      if (!e) return;
+      Object.assign(e, patch);
+      if (patch.trashedAt === undefined && 'trashedAt' in patch) delete e.trashedAt;
+      if (patch.category === '' ) delete e.category;
+      if ('name' in patch || 'category' in patch) {
+        const p = (await reqP(store.get(LESSON(id)))) as StoredProject | undefined;
+        if (p) store.put({ ...p, ...(patch.name ? { name: patch.name } : {}), ...('category' in patch ? { category: patch.category || undefined } : {}) }, LESSON(id));
+      }
+      if (patch.category && !meta.categories.includes(patch.category)) meta.categories.push(patch.category);
+      store.put(index, LIB_INDEX);
+      store.put(meta, LIB_META);
+    });
+  });
+}
+
+/** 휴지통에서 완전히 지우기 */
+export async function deleteLessonForever(id: string): Promise<void> {
+  await withDB(db => runTx(db, 'readwrite', async store => {
+    const { index } = await readLib(store);
+    store.put(index.filter(e => e.id !== id), LIB_INDEX);
+    store.delete(LESSON(id));
+  }));
+}
+
+/** 수업 복제 → 새 수업 번호 */
+export async function duplicateLesson(id: string, newLessonId: string): Promise<LibraryEntry | null> {
+  const p = await loadLesson(id);
+  if (!p) return null;
+  const copy: StoredProject = { ...p, lessonId: newLessonId, name: `${p.name} (사본)`, savedAt: new Date().toISOString(), driveFileId: undefined, driveModified: undefined };
+  await withDB(db => runTx(db, 'readwrite', async store => {
+    const { index } = await readLib(store);
+    store.put(copy, LESSON(newLessonId));
+    index.push({ ...entryOf(copy), createdAt: copy.savedAt, favorite: false });
+    store.put(index, LIB_INDEX);
+  }));
+  return entryOf(copy);
+}
+
+/** 분류 목록 (빈 분류도 남김) */
+export async function setCategories(categories: string[]): Promise<void> {
+  await withDB(db => runTx(db, 'readwrite', async store => {
+    const { meta } = await readLib(store);
+    store.put({ ...meta, categories }, LIB_META);
+  }));
+}
+
+/** 분류 이름 바꾸기/지우기 (to=''이면 '분류 없음'으로) */
+export async function renameCategory(from: string, to: string): Promise<void> {
+  await withDB(db => runTx(db, 'readwrite', async store => {
+    const { index, meta } = await readLib(store);
+    for (const e of index) if (e.category === from) { if (to) e.category = to; else delete e.category; }
+    meta.categories = Array.from(new Set(meta.categories.map(c => (c === from ? to : c)).filter(Boolean)));
+    store.put(index, LIB_INDEX);
+    store.put(meta, LIB_META);
+  }));
+}
+
+/** 지금 여는 수업이 무엇인지 기억 (서재에 아직 없는 빈 수업이면 비움) */
+export async function setLastLesson(id: string | null): Promise<void> {
+  await withDB(db => runTx(db, 'readwrite', async store => {
+    const { meta } = await readLib(store);
+    store.put({ ...meta, lastLessonId: id || undefined }, LIB_META);
+  })).catch(() => {});
+}
+
 // ---------------------------------------------------------------------------
-// 수업 기록 (자동 보관)
-//  - 다른 수업을 저장하면 원래 수업을 보관한다 ('다른 수업으로 바뀌기 전')
-//  - 같은 수업도 20분마다 한 번씩 그때 모습을 보관한다 ('자동 보관')
-//  - 최근 15개까지. 무엇을 해도 저장된 수업이 한 번에 사라지지 않게 한다.
+// 수업 기록 (자동 보관): 같은 수업도 20분마다 그때 모습을 보관 (최근 15개)
 // ---------------------------------------------------------------------------
 
 export type HistoryReason = 'replaced' | 'snapshot' | 'before-restore';
@@ -69,13 +264,9 @@ export interface HistoryEntry {
   lessonId: string;
 }
 const INDEX_KEY = 'history-index';
-const OLD_PREV_KEY = 'previous';
-const MAX_HISTORY = 15;
+const MAX_HISTORY = 30;
 const SNAPSHOT_EVERY_MS = 20 * 60 * 1000;
 
-const reqP = <T,>(r: IDBRequest<T>) => new Promise<T>((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-
-/** 같은 트랜잭션 안에서 기록 한 칸 추가 + 오래된 것 정리 */
 function pushHistory(store: IDBObjectStore, index: HistoryEntry[], p: StoredProject, reason: HistoryReason): HistoryEntry[] {
   const id = `history-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   store.put(p, id);
@@ -84,38 +275,8 @@ function pushHistory(store: IDBObjectStore, index: HistoryEntry[], p: StoredProj
   return next.slice(0, MAX_HISTORY);
 }
 
-const runTx = (db: IDBDatabase, fn: (store: IDBObjectStore, tx: IDBTransaction) => Promise<void> | void) =>
-  new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-    Promise.resolve(fn(tx.objectStore(STORE), tx)).catch(err => { try { tx.abort(); } catch { /* 무시 */ } reject(err); });
-  });
-
-/** 덮어쓰기 전에 필요하면 지금 저장본을 수업 기록에 보관 */
-async function keepHistoryBefore(db: IDBDatabase, project: StoredProject) {
-  await runTx(db, async store => {
-    const [oldRaw, idxRaw, prevRaw] = await Promise.all([reqP(store.get(KEY)), reqP(store.get(INDEX_KEY)), reqP(store.get(OLD_PREV_KEY))]);
-    const old = oldRaw as StoredProject | undefined;
-    let index = (idxRaw as HistoryEntry[] | undefined) || [];
-    const before = index.length;
-    // v0.9.1의 '직전 수업' 한 칸을 기록으로 옮긴다
-    if (prevRaw) { index = pushHistory(store, index, prevRaw as StoredProject, 'replaced'); store.delete(OLD_PREV_KEY); }
-    if (old && hasContent(old)) {
-      if (lessonOf(old) !== project.lessonId) index = pushHistory(store, index, old, 'replaced');
-      else {
-        const last = index.find(h => h.lessonId === lessonOf(old));
-        if (Date.now() - (last ? Date.parse(last.keptAt) : 0) > SNAPSHOT_EVERY_MS) index = pushHistory(store, index, old, 'snapshot');
-      }
-    }
-    if (index.length !== before || prevRaw) store.put(index, INDEX_KEY);
-  });
-}
-
-/** 저장 공간이 모자랄 때: 오래된 기록 절반을 지운다 (자동 보관만, 지금 수업은 건드리지 않음) */
 async function trimHistory(db: IDBDatabase) {
-  await runTx(db, async store => {
+  await runTx(db, 'readwrite', async store => {
     const index = ((await reqP(store.get(INDEX_KEY))) as HistoryEntry[] | undefined) || [];
     const keep = index.slice(0, Math.floor(index.length / 2));
     for (const h of index.slice(keep.length)) store.delete(h.id);
@@ -124,73 +285,90 @@ async function trimHistory(db: IDBDatabase) {
 }
 
 /**
- * 이 브라우저에 저장. 덮어쓰기 전에 원래 수업을 수업 기록에 보관한다.
- * 보관이 실패해도(저장 공간 부족 등) 지금 수업 저장은 반드시 한다.
+ * 수업 저장: 그 수업의 칸에만 쓴다(다른 수업은 절대 건드리지 않음).
+ * 20분마다 직전 모습을 수업 기록에 보관하고, 보관이 실패해도 저장은 반드시 한다.
+ * 아직 아무것도 그리지 않은 새 수업은 목록에 올리지 않는다.
  */
-export async function saveProject(project: StoredProject): Promise<void> {
-  const db = await openDB();
-  try {
-    try { await keepHistoryBefore(db, project); }
-    catch (e) { console.warn('수업 기록 보관 실패', e); try { await trimHistory(db); } catch { /* 무시 */ } }
-    const put = () => runTx(db, store => { store.put(project, KEY); });
+export async function saveProject(project: StoredProject, opts: { touchLast?: boolean } = {}): Promise<void> {
+  const id = lessonOf(project);
+  const p = { ...project, lessonId: id };
+  await withDB(async db => {
+    await ensureMigrated(db);
+    let skip = false;
+    try {
+      await runTx(db, 'readwrite', async store => {
+        const [oldRaw, hRaw, lib] = await Promise.all([reqP(store.get(LESSON(id))), reqP(store.get(INDEX_KEY)), readLib(store)]);
+        const old = oldRaw as StoredProject | undefined;
+        if (!old && !hasContent(p) && !lib.index.some(e => e.id === id)) { skip = true; return; }
+        let h = (hRaw as HistoryEntry[] | undefined) || [];
+        if (old && hasContent(old)) {
+          const last = h.find(x => x.lessonId === id);
+          if (Date.now() - (last ? Date.parse(last.keptAt) : 0) > SNAPSHOT_EVERY_MS) { h = pushHistory(store, h, old, 'snapshot'); store.put(h, INDEX_KEY); }
+        }
+      });
+    } catch (e) { console.warn('수업 기록 보관 실패', e); await trimHistory(db).catch(() => {}); }
+    if (skip) return;
+    const put = () => runTx(db, 'readwrite', async store => {
+      const { index, meta } = await readLib(store);
+      const i = index.findIndex(e => e.id === id);
+      const entry = entryOf(p, i >= 0 ? index[i] : undefined);
+      if (i >= 0) index[i] = entry; else index.push(entry);
+      store.put(p, LESSON(id));
+      store.put(index, LIB_INDEX);
+      store.put(opts.touchLast === false ? meta : { ...meta, lastLessonId: id }, LIB_META);
+    });
     try { await put(); }
-    catch (e) {
-      // 공간이 모자라면 오래된 기록을 줄이고 한 번 더
-      await trimHistory(db).catch(() => {});
-      await put();
-    }
-  } finally { db.close(); }
-}
-
-export async function loadProject(): Promise<StoredProject | null> {
-  const db = await openDB();
-  const result = await new Promise<StoredProject | null>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(KEY);
-    req.onsuccess = () => resolve((req.result as StoredProject) || null);
-    req.onerror = () => reject(req.error);
+    catch { await trimHistory(db).catch(() => {}); await put(); }
   });
-  db.close();
-  return result;
 }
 
-/** 수업 기록 목록 (최근 것부터). 예전 '직전 수업'도 함께 보여 준다 */
-export async function listHistory(): Promise<HistoryEntry[]> {
-  const db = await openDB();
-  const tx = db.transaction(STORE, 'readonly');
-  const st = tx.objectStore(STORE);
-  const [idx, prev] = await Promise.all([reqP(st.get(INDEX_KEY)), reqP(st.get(OLD_PREV_KEY))]);
-  db.close();
-  const list = ((idx as HistoryEntry[]) || []).slice();
-  const p = prev as StoredProject | undefined;
-  if (p) list.unshift({ id: OLD_PREV_KEY, name: p.name || '수업', savedAt: p.savedAt, keptAt: p.savedAt, slides: p.scenes?.length || 0, reason: 'replaced', lessonId: lessonOf(p) });
-  return list;
+/** 수업 기록 목록 (최근 것부터). lessonId를 주면 그 수업 것만 */
+export async function listHistory(lessonId?: string): Promise<HistoryEntry[]> {
+  return withDB(async db => {
+    let list: HistoryEntry[] = [];
+    await runTx(db, 'readonly', async store => { list = ((await reqP(store.get(INDEX_KEY))) as HistoryEntry[]) || []; });
+    return lessonId ? list.filter(h => h.lessonId === lessonId) : list;
+  });
 }
 
 export async function loadHistory(id: string): Promise<StoredProject | null> {
-  const db = await openDB();
-  const p = await reqP(db.transaction(STORE, 'readonly').objectStore(STORE).get(id));
-  db.close();
-  return (p as StoredProject) || null;
+  return withDB(async db => {
+    let p: StoredProject | undefined;
+    await runTx(db, 'readonly', async store => { p = (await reqP(store.get(id))) as StoredProject | undefined; });
+    return p || null;
+  });
 }
 
 /**
- * 기록의 수업을 되살린다: 지금 수업은 먼저 기록에 보관하고, 고른 수업을 지금 수업으로.
- * (되살린 기록은 그대로 남겨 둔다 → 몇 번을 오가도 사라지는 것이 없다)
+ * 기록의 모습으로 되돌리기: 그 수업의 지금 모습을 먼저 기록에 보관하고, 고른 모습을 그 수업 칸에 넣는다.
+ * (되살린 기록도 그대로 남겨 둔다 → 몇 번을 오가도 사라지는 것이 없다)
  */
 export async function restoreHistory(id: string, current: StoredProject | null): Promise<StoredProject | null> {
   const target = await loadHistory(id);
   if (!target) return null;
-  const db = await openDB();
-  try {
-    await runTx(db, async store => {
-      let index = ((await reqP(store.get(INDEX_KEY))) as HistoryEntry[] | undefined) || [];
-      if (current && hasContent(current)) index = pushHistory(store, index, current, 'before-restore');
-      store.put(index, INDEX_KEY);
-      store.put({ ...target, lessonId: lessonOf(target) }, KEY);
+  const tid = lessonOf(target);
+  const restored = { ...target, lessonId: tid, savedAt: new Date().toISOString() };
+  await withDB(async db => {
+    await ensureMigrated(db);
+    await runTx(db, 'readwrite', async store => {
+      let h = ((await reqP(store.get(INDEX_KEY))) as HistoryEntry[] | undefined) || [];
+      const nowInSlot = (await reqP(store.get(LESSON(tid)))) as StoredProject | undefined;
+      const keepFirst = current && lessonOf(current) === tid ? current : nowInSlot;
+      if (keepFirst && hasContent(keepFirst)) h = pushHistory(store, h, keepFirst, 'before-restore');
+      // 다른 수업을 보던 중이었으면 그 수업도 저장해 둔다
+      if (current && lessonOf(current) !== tid && hasContent(current)) store.put({ ...current, lessonId: lessonOf(current) }, LESSON(lessonOf(current)));
+      store.put(h, INDEX_KEY);
+      const { index, meta } = await readLib(store);
+      const i = index.findIndex(e => e.id === tid);
+      const entry = entryOf(restored, i >= 0 ? index[i] : undefined);
+      delete entry.trashedAt;
+      if (i >= 0) index[i] = entry; else index.push(entry);
+      store.put(restored, LESSON(tid));
+      store.put(index, LIB_INDEX);
+      store.put({ ...meta, lastLessonId: tid }, LIB_META);
     });
-  } finally { db.close(); }
-  return { ...target, lessonId: lessonOf(target) };
+  });
+  return restored;
 }
 
 export function isValidProject(p: any): p is StoredProject {

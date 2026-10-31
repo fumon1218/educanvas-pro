@@ -15,7 +15,9 @@ export const StudentCastModal: React.FC<{
   count: number;
   onStart: () => void;
   onStop: () => void;
-}> = ({ isOpen, onClose, live, status, code, url, count, onStart, onStop }) => {
+  allowSave?: boolean;
+  onAllowSave?: (v: boolean) => void;
+}> = ({ isOpen, onClose, live, status, code, url, count, onStart, onStop, allowSave = true, onAllowSave }) => {
   const [qr, setQr] = useState<string | null>(null);
   useEffect(() => {
     if (!url) { setQr(null); return; }
@@ -54,6 +56,7 @@ export const StudentCastModal: React.FC<{
                   <li>선생님이 넘기는 슬라이드, 판서, 확대한 부분, 레이저 점이 그대로 보입니다.</li>
                   <li>학생은 화면을 바꿀 수 없습니다. 끝내기를 누르면 학생 화면도 멈춥니다.</li>
                 </ul>
+                <SaveToggle value={allowSave} onChange={onAllowSave} />
                 <button onClick={onStart} className="w-full h-12 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-semibold flex items-center justify-center gap-2">
                   <Radio size={18} />보내기 시작
                 </button>
@@ -77,6 +80,7 @@ export const StudentCastModal: React.FC<{
                   <input readOnly value={url ?? ''} onFocus={e => e.currentTarget.select()} className="flex-1 min-w-0 h-10 px-3 rounded-xl bg-slate-100 text-[12px] text-slate-600" aria-label="학생용 링크" />
                   <button onClick={copy} className="h-10 px-3 rounded-xl bg-slate-900 text-white text-[13px] font-semibold flex items-center gap-1.5"><Copy size={14} />복사</button>
                 </div>
+                <div className="mt-3"><SaveToggle value={allowSave} onChange={onAllowSave} /></div>
                 <button onClick={onStop} className="mt-4 w-full h-11 rounded-2xl ring-1 ring-red-200 text-red-600 hover:bg-red-50 font-semibold flex items-center justify-center gap-2">
                   <Square size={15} />보내기 끝내기
                 </button>
@@ -88,3 +92,14 @@ export const StudentCastModal: React.FC<{
     </AnimatePresence>
   );
 };
+
+/** 학생이 판서를 받아 갈 수 있게 할지 */
+const SaveToggle: React.FC<{ value: boolean; onChange?: (v: boolean) => void }> = ({ value, onChange }) => (
+  <label className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 cursor-pointer">
+    <span>
+      <span className="block text-[13px] font-semibold text-slate-800">학생이 판서 받아 가기</span>
+      <span className="block text-[12px] text-slate-500">학생이 본 슬라이드를 그림·PDF로 저장해 복습할 수 있습니다</span>
+    </span>
+    <input type="checkbox" className="w-5 h-5 accent-sky-600" checked={value} onChange={e => onChange?.(e.target.checked)} aria-label="학생이 판서 받아 가기" />
+  </label>
+);

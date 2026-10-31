@@ -5,7 +5,6 @@ import { isBackgroundId, isDarkBackground, backgroundColor } from './lib/backgro
 import { StudentCaster, makeCastCode, castUrl, type CastView, type Poll, type StudentState } from './lib/studentCast';
 import { StudentResponsePanel } from './components/Cast/StudentResponsePanel';
 import { StudentCastModal } from './components/Cast/StudentCastModal';
-import { DriveLessonsModal } from './components/UI/DriveLessonsModal';
 import { Toolbar } from './components/UI/Toolbar';
 import { MediaController } from './components/UI/MediaController';
 import { ScoreDock } from './components/UI/ScoreDock';
@@ -18,6 +17,9 @@ import { SettingsModal } from './components/UI/SettingsModal';
 import { SlideNavigator } from './components/UI/SlideNavigator';
 import { FloatingCamera } from './components/UI/FloatingCamera';
 import { LessonHistoryModal } from './components/UI/LessonHistoryModal';
+import { LessonDashboard } from './components/UI/LessonDashboard';
+import { ClipSaveModal, StudyLogModal, FocusChip, FlashReviewBar, type FocusState } from './components/Study/StudyTools';
+import { WRONG_NOTE_ID, createClipScene, addToWrongNote, addStudyMinute, addFocusSession, nextDue, initialStudentMode, saveStudentMode } from './lib/study';
 import { PdfImportModal, type PdfImportMode } from './components/UI/PdfImportModal';
 import { CollaborationModal } from './components/UI/CollaborationModal';
 import { ConfirmDialog, ConfirmState } from './components/UI/ConfirmDialog';
@@ -50,12 +52,13 @@ import { Toaster, toast } from 'sonner';
 import { isStaleChunkError, recoverFromStaleChunk } from './lib/appUpdate';
 import { TEST_MODE } from './lib/testMode';
 import { DocImportError, isDocumentFile, type PageSource } from './lib/docImport';
+import { saveDoc } from './lib/hdRender';
 import { cn } from './lib/utils';
 import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { newId, normalizeSceneData, renderSceneImage, createImageScene, createScoreScene, createStackedPdfScene } from './lib/canvasData';
-import { saveProject, loadProject, restoreHistory, legacyLessonId, type HistoryEntry, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
+import { saveProject, loadProject, loadLesson, setLastLesson, restoreHistory, legacyLessonId, type HistoryEntry, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
 import { formatBytes } from './lib/assetStore';
 
 interface Scene {
@@ -138,7 +141,7 @@ export default function App() {
   const driveDirtyRef = useRef(false);
   const markDirty = useCallback(() => { dirtyRef.current = true; driveDirtyRef.current = true; }, []);
   // 수업 고유 번호와 드라이브 파일
-  const lessonRef = useRef<{ lessonId: string; fileId: string | null; modified: string | null }>({ lessonId: newId() + newId(), fileId: null, modified: null });
+  const lessonRef = useRef<{ lessonId: string; fileId: string | null; modified: string | null; category?: string }>({ lessonId: newId() + newId(), fileId: null, modified: null });
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'error'>('saved');
   const saveErrorRef = useRef(false);
 
@@ -563,6 +566,7 @@ export default function App() {
       canvasBackground,
       scenes: scenesRef.current.map(({ id, name, data, thumbnail, background }) => ({ id, name, data, thumbnail, ...(background ? { background } : {}) })),
       lessonId: lessonRef.current.lessonId,
+      ...(lessonRef.current.category ? { category: lessonRef.current.category } : {}),
       ...(lessonRef.current.fileId ? { driveFileId: lessonRef.current.fileId } : {}),
       ...(lessonRef.current.modified ? { driveModified: lessonRef.current.modified } : {}),
     };
@@ -573,20 +577,20 @@ export default function App() {
       await saveProject(buildProject());
       dirtyRef.current = false;
       saveErrorRef.current = false;
-      if (manual) toast.success('저장했습니다.', { description: '이 브라우저에 저장되었습니다. 다른 컴퓨터에서 쓰려면 [파일로 내보내기]를 이용하세요.' });
+      if (manual) toast.success(`'${projectName}' 수업을 저장했습니다.`, { description: driveOnRef.current ? '이 컴퓨터와 구글 드라이브에 저장됩니다. [내 수업]에서 언제든 엽니다.' : '이 컴퓨터(이 브라우저)에 저장되었습니다. 왼쪽 위 [내 수업]에서 언제든 엽니다.' });
     } catch (err) {
       console.error('저장 실패', err);
       saveErrorRef.current = true;
       warnOnce(manual ? `save-${Date.now()}` : 'autosave-error', () =>
         toast.error('브라우저에 저장하지 못했습니다.', { description: '저장 공간이 부족할 수 있습니다. [파일로 내보내기]로 보관해 주세요.' }));
     }
-  }, [buildProject]);
+  }, [buildProject, projectName]);
 
   const applyProject = useCallback((p: StoredProject, opts: { publish?: boolean } = {}) => {
     const list: Scene[] = p.scenes.map((s, i) => ({ id: s.id, name: s.name, data: normalizeSceneData(s.data), thumbnail: s.thumbnail, order: i, ...(isBackgroundId(s.background) ? { background: s.background } : {}) }));
     const removed = scenesRef.current.filter(s => !list.some(n => n.id === s.id)).map(s => s.id);
     setProjectName(p.name || '수업');
-    lessonRef.current = { lessonId: p.lessonId || legacyLessonId(p), fileId: p.driveFileId || null, modified: p.driveModified || null };
+    lessonRef.current = { lessonId: p.lessonId || legacyLessonId(p), fileId: p.driveFileId || null, modified: p.driveModified || null, category: p.category };
     if (isBackgroundId(p.canvasBackground)) setCanvasBackground(p.canvasBackground);
     updateScenes(() => list);
     const target = list.some(s => s.id === p.activeSceneId) ? p.activeSceneId : list[0].id;
@@ -669,6 +673,7 @@ export default function App() {
   const openDriveLesson = useCallback(async (l: { id: string; name: string; modifiedTime: string }) => {
     const token = await driveTokenOrNull(true);
     if (!token) return;
+    if (dirtyRef.current) await saveRef.current(false);
     const id = toast.loading(`'${l.name}'을(를) 여는 중…`);
     try {
       const sync = await import('./lib/driveSync');
@@ -713,14 +718,37 @@ export default function App() {
     toast.success('이 기기에서 드라이브 저장을 껐습니다.', { description: '드라이브에 있는 수업은 그대로 남아 있습니다.' });
   }, []);
 
-  const newLesson = useCallback(async () => {
-    if (driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
+  const newLesson = useCallback(async (category?: string, opts: { skipSave?: boolean } = {}) => {
+    if (!opts.skipSave && dirtyRef.current) await saveRef.current(false);
+    if (!opts.skipSave && driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
     const first: Scene = { id: newId(), name: '슬라이드 1', data: null, order: 0 };
     applyProject({ format: 'educanvas-project', version: 1, name: '새 수업', savedAt: new Date().toISOString(), activeSceneId: first.id, canvasBackground: 'blank', scenes: [{ id: first.id, name: first.name, data: null }] }, { publish: true });
-    lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null };
+    lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null, category };
     setLessonsOpen(false);
-    toast.success('새 수업을 시작했습니다.', { description: '이름을 바꾸려면 위쪽 수업 이름을 누르세요.' });
+    toast.success('새 수업을 시작했습니다.', { description: `${category ? `'${category}' 분류 · ` : ''}판서를 시작하면 [내 수업]에 자동으로 저장됩니다. 이름은 위쪽 수업 이름을 눌러 바꿉니다.` });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveToDrive, applyProject]);
+
+  /** 이 컴퓨터에 저장된 수업 열기 (지금 수업은 먼저 저장) */
+  const openLocalLesson = useCallback(async (id: string) => {
+    if (id === lessonRef.current.lessonId) { setLessonsOpen(false); return; }
+    const tid = toast.loading('수업을 여는 중…');
+    try {
+      if (dirtyRef.current) await saveRef.current(false);
+      if (driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
+      const p = await loadLesson(id);
+      if (!p) throw new Error('수업을 찾지 못했습니다.');
+      applyProject(p, { publish: true });
+      driveDirtyRef.current = false;
+      if (driveOnRef.current) setDriveState(p.driveFileId ? 'synced' : 'pending');
+      void setLastLesson(id);
+      setLessonsOpen(false);
+      toast.success(`'${p.name}'을(를) 열었습니다.`, { id: tid });
+    } catch (e: any) {
+      toast.error('수업을 열지 못했습니다.', { id: tid, description: e?.message });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyProject, saveToDrive]);
 
   // 드라이브 자동 저장: 바뀐 것이 있으면 30초마다 (그리는 중에는 기다림)
   useEffect(() => {
@@ -748,23 +776,11 @@ export default function App() {
     return listLessons(token);
   }, [driveTokenOrNull]);
 
-  const handleLoadFromBrowser = useCallback(async () => {
-    try {
-      const p = await loadProject();
-      if (!p) { toast.error('저장된 수업이 없습니다.'); return; }
-      setConfirmState({
-        title: '저장된 수업을 불러올까요?',
-        message: `'${p.name}' (${new Date(p.savedAt).toLocaleString('ko-KR')} 저장)\n지금 화면의 내용은 바뀝니다.`,
-        confirmLabel: '불러오기',
-        onConfirm: () => { applyProject(p, { publish: true }); toast.success('불러왔습니다.'); },
-      });
-    } catch {
-      toast.error('불러오지 못했습니다.');
-    }
-  }, [applyProject]);
+  const handleLoadFromBrowser = useCallback(() => setLessonsOpen(true), []);
 
   /** 수업 기록에서 되살리기: 지금 수업은 먼저 기록에 보관된다 */
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLesson, setHistoryLesson] = useState<string | undefined>(undefined);
   const buildRef = useRef(buildProject);
   buildRef.current = buildProject;
   const handleRestoreHistory = useCallback((h: HistoryEntry) => {
@@ -810,7 +826,7 @@ export default function App() {
       if (!isValidProject(p)) throw new Error('invalid');
       setConfirmState({
         title: `'${p.name}' 파일을 열까요?`,
-        message: '지금 화면의 내용은 바뀝니다. 필요하면 먼저 저장해 주세요.',
+        message: '지금 수업은 저장되고, 이 파일은 새 수업으로 열립니다.',
         confirmLabel: '열기',
         onConfirm: async () => {
           let added = 0;
@@ -819,9 +835,12 @@ export default function App() {
             try { added = await unpackModels(p); } catch (err) { console.error(err); }
             toast.dismiss(id);
           }
-          applyProject(p, { publish: true });
+          if (dirtyRef.current) await saveRef.current(false);
+          // 파일은 새 수업으로 연다: 이 컴퓨터에 있는 같은 수업을 덮어쓰지 않게
+          applyProject({ ...p, lessonId: newId() + newId(), driveFileId: undefined, driveModified: undefined }, { publish: true });
           markDirty();
-          toast.success('파일을 열었습니다.', added ? { description: `3D 모델 ${added}개를 이 컴퓨터의 자산함에 넣었습니다.` } : undefined);
+          setLessonsOpen(false);
+          toast.success('파일을 열었습니다. [내 수업]에 새 수업으로 저장됩니다.', added ? { description: `3D 모델 ${added}개를 이 컴퓨터의 자산함에 넣었습니다.` } : undefined);
         },
       });
     } catch {
@@ -829,16 +848,144 @@ export default function App() {
     }
   }, [applyProject]);
 
-  // 시작할 때 이전 작업 복원 제안
+  // =====================================================================
+  // 학생 학습 도구: 오답 노트 · 가림 카드 복습 · 공부 기록 · 집중 타이머 · 학생 모드
+  // =====================================================================
+  const [studentMode, setStudentMode] = useState(initialStudentMode);
+  const [clipImage, setClipImage] = useState<string | null>(null);
+  const insertScenesRef = useRef<(c: Scene[]) => void>(() => {});
+  const [studyOpen, setStudyOpen] = useState(false);
+
+  const saveClip = useCallback(async (info: { tag: string; memo: string }) => {
+    if (!clipImage) return;
+    try {
+      const src = `${projectName} · ${sceneLabelRef.current(activeIdRef.current)}`;
+      const cv = whiteboardRef.current?.getCanvas();
+      const data = await createClipScene(clipImage, { ...info, source: src }, cv?.width || window.innerWidth, cv?.height || window.innerHeight);
+      const title = info.tag ? `${info.tag}` : '오답';
+      let n: number;
+      if (lessonRef.current.lessonId === WRONG_NOTE_ID) {
+        insertScenesRef.current([{ id: newId(), name: title, data, order: 0 }]);
+        n = scenesRef.current.length;
+      } else n = await addToWrongNote(data, title);
+      setClipImage(null);
+      toast.success(`오답 노트에 넣었습니다 (${n}번째).`, {
+        description: '같은 방법으로 계속 모을 수 있습니다.',
+        action: lessonRef.current.lessonId === WRONG_NOTE_ID ? undefined : { label: '오답 노트 열기', onClick: () => { void openLocalLesson(WRONG_NOTE_ID); } },
+      });
+    } catch (e) {
+      console.error(e);
+      toast.error('오답 노트에 넣지 못했습니다.');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipImage, projectName]);
+
+  // 공부 시간: 수업 화면이 보이고 2분 안에 무언가를 했으면 1분씩 기록
+  const lastActivityRef = useRef(Date.now());
+  useEffect(() => {
+    const bump = () => { lastActivityRef.current = Date.now(); };
+    window.addEventListener('pointerdown', bump, true);
+    window.addEventListener('keydown', bump, true);
+    window.addEventListener('wheel', bump, { capture: true, passive: true });
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible' && Date.now() - lastActivityRef.current < 120_000 && !boardIdRef.current)
+        addStudyMinute(lessonRef.current.lessonId, projectNameRef.current || '수업');
+    }, 60_000);
+    return () => { clearInterval(t); window.removeEventListener('pointerdown', bump, true); window.removeEventListener('keydown', bump, true); window.removeEventListener('wheel', bump, true); };
+  }, []);
+
+  // 집중 타이머
+  const [focus, setFocus] = useState<FocusState | null>(null);
+  const beep = useCallback(() => {
+    try {
+      const ac = new AudioContext();
+      [0, 0.25, 0.5].forEach(t => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = 880; g.gain.setValueAtTime(0.18, ac.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t + 0.2); o.connect(g).connect(ac.destination); o.start(ac.currentTime + t); o.stop(ac.currentTime + t + 0.22); });
+      setTimeout(() => ac.close(), 1200);
+    } catch { /* 무시 */ }
+  }, []);
+  const startFocus = useCallback((focusMin: number, breakMin: number) => {
+    setFocus({ phase: 'focus', endsAt: Date.now() + focusMin * 60_000, focusMin, breakMin });
+    toast.success(`${focusMin}분 집중을 시작합니다.`);
+  }, []);
+  const togglePauseFocus = useCallback(() => setFocus(f => (!f ? f : f.paused !== undefined ? { ...f, endsAt: Date.now() + f.paused, paused: undefined } : { ...f, paused: Math.max(0, f.endsAt - Date.now()) })), []);
+  useEffect(() => {
+    if (!focus || focus.paused !== undefined) return;
+    const t = setInterval(() => {
+      if (Date.now() < focus.endsAt) return;
+      beep();
+      if (focus.phase === 'focus') {
+        addFocusSession();
+        toast.success('집중 끝! 잠깐 쉬어요.', { description: `${focus.breakMin}분 쉬는 시간` });
+        setFocus({ ...focus, phase: 'break', endsAt: Date.now() + focus.breakMin * 60_000 });
+      } else {
+        toast('쉬는 시간이 끝났습니다.', { action: { label: '다시 집중', onClick: () => startFocus(focus.focusMin, focus.breakMin) } });
+        setFocus(null);
+      }
+    }, 500);
+    return () => clearInterval(t);
+  }, [focus, beep, startFocus]);
+
+  // 가림 카드 복습: 오늘 볼 카드(처음이거나 날짜가 된 것)를 낮은 단계부터
+  type ReviewCard = { sceneId: string; id: string; box: number; requeued?: boolean };
+  const [review, setReview] = useState<{ queue: ReviewCard[]; i: number; revealed: boolean; known: number; again: number; done?: boolean } | null>(null);
+  const showCard = useCallback(async (c: ReviewCard) => {
+    if (activeIdRef.current !== c.sceneId) setActiveSceneId(c.sceneId);
+    for (let k = 0; k < 30; k++) {
+      if (activeIdRef.current === c.sceneId && whiteboardRef.current?.focusObject(c.id)) {
+        whiteboardRef.current?.setFlash(c.id, { revealed: false });
+        return;
+      }
+      await new Promise(r => setTimeout(r, 120));
+    }
+  }, [setActiveSceneId]);
+  const startReview = useCallback(async () => {
+    captureCurrent();
+    const cards: (ReviewCard & { due: number })[] = [];
+    for (const sc of scenesRef.current) {
+      if (sc.id === activeIdRef.current) {
+        whiteboardRef.current?.getFlashCards().forEach(f => cards.push({ sceneId: sc.id, id: f.id, box: f.box, due: f.due }));
+        continue;
+      }
+      if (!sc.data || !sc.data.includes('"isFlash"')) continue;
+      try { (JSON.parse(sc.data).objects || []).forEach((o: any) => { if (o?.isFlash && o.id) cards.push({ sceneId: sc.id, id: o.id, box: o.flashBox || 1, due: o.flashDue || 0 }); }); } catch { /* 무시 */ }
+    }
+    if (!cards.length) { toast.info('가림 카드가 없습니다.', { description: '[공부·복습 → 가림 카드 만들기]로 외울 곳을 덮어 두세요.' }); return; }
+    let queue = cards.filter(c => c.due <= Date.now());
+    if (!queue.length) { queue = cards; toast('오늘 복습할 카드는 다 봤습니다. 모든 카드를 한 번 더 봅니다.'); }
+    queue.sort((a, b) => a.box - b.box || a.due - b.due);
+    setReview({ queue, i: 0, revealed: false, known: 0, again: 0 });
+    await showCard(queue[0]);
+  }, [captureCurrent, showCard]);
+  const revealCard = useCallback(() => {
+    setReview(r => { if (!r) return r; whiteboardRef.current?.setFlash(r.queue[r.i].id, { revealed: true }); return { ...r, revealed: true }; });
+  }, []);
+  const gradeCard = useCallback((known: boolean) => {
+    setReview(r => {
+      if (!r) return r;
+      const c = r.queue[r.i];
+      const box = known ? Math.min(5, c.box + 1) : 1;
+      whiteboardRef.current?.setFlash(c.id, { box, due: known ? nextDue(box) : Date.now(), revealed: false });
+      markDirty();
+      const queue = [...r.queue];
+      if (!known && !c.requeued) queue.push({ ...c, box, requeued: true }); // 모르는 카드는 이번에 한 번 더
+      const next = { ...r, queue, i: r.i + 1, revealed: false, known: r.known + (known ? 1 : 0), again: r.again + (known ? 0 : 1) };
+      if (next.i >= queue.length) return { ...next, i: queue.length - 1, done: true };
+      void showCard(queue[next.i]);
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCard]);
+
+  // 시작할 때 마지막으로 연 수업을 이어서 연다 (공유 보드로 들어온 경우는 제외)
   useEffect(() => {
     if (boardIdRef.current) return;
     loadProject().then(p => {
-      if (!p || !p.scenes.some(s => s.data && JSON.parse(s.data).objects?.length)) return;
-      toast('이전에 작업하던 수업이 있습니다.', {
-        id: 'restore',
-        description: `'${p.name}' · ${new Date(p.savedAt).toLocaleString('ko-KR')}`,
-        duration: 15000,
-        action: { label: '이어서 하기', onClick: () => applyProject(p) },
+      if (!p || boardIdRef.current || dirtyRef.current) return;
+      applyProject(p);
+      toast(`'${p.name}' 수업을 이어서 엽니다.`, {
+        id: 'restore', duration: 6000,
+        description: '다른 수업은 왼쪽 위 [내 수업]에서 엽니다.',
+        action: { label: '내 수업', onClick: () => setLessonsOpen(true) },
       });
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -930,6 +1077,7 @@ export default function App() {
     markDirty();
     publishStructure(removed);
   }, [captureCurrent, updateScenes, setActiveSceneId, publishStructure]);
+  insertScenesRef.current = insertScenesAfterCurrent;
 
   /** 문서(PDF·한글·워드·파워포인트·엑셀·키노트 …)를 먼저 열어 쪽 수와 첫 쪽 미리보기를 보여 준다 */
   const openPdf = useCallback(async (file: File) => {
@@ -972,10 +1120,13 @@ export default function App() {
         toast.loading(`${info.kind} 쪽 변환 중… (${i - from + 1}/${count})`, { id: toastId });
         pages.push(await doc.render(i, 1700));
       }
+      // 고화질 확대용 원본 보관 (PDF·한글)
+      const docId = doc.hd ? await saveDoc(doc.hd.data, doc.hd.kind, info.name) : null;
+      const docOf = (i: number) => (docId ? { docId, docPage: from + i } : undefined);
       const baseName = info.name.replace(/\.[a-z0-9]+$/i, '');
       const range = count === 1 ? `${from}쪽` : `${from}~${to}쪽`;
       if (mode === 'grid') {
-        await whiteboardRef.current?.addImages(pages);
+        await whiteboardRef.current?.addImages(pages, pages.map((_, i) => docOf(i) || null));
         toast.success(`${count}쪽을 지금 슬라이드에 넣었습니다.`, { id: toastId });
         return;
       }
@@ -983,14 +1134,14 @@ export default function App() {
       const w = canvas?.width || window.innerWidth;
       const h = canvas?.height || window.innerHeight;
       if (mode === 'stack') {
-        const data = await createStackedPdfScene(pages, from, w);
+        const data = await createStackedPdfScene(pages, from, w, docId);
         insertScenesAfterCurrent([{ id: newId(), name: `${baseName} ${range}`.slice(0, 100), data, order: 0 }]);
         toast.success(`${count}쪽을 슬라이드 하나에 이어 붙였습니다.`, { id: toastId, description: 'PageDown(→)으로 한 쪽씩, 휠·두 손가락으로 위아래로 넘겨 보세요.' });
         return;
       }
       const created: Scene[] = [];
       for (let i = 0; i < pages.length; i++) {
-        created.push({ id: newId(), name: `${baseName} ${from + i}쪽`.slice(0, 100), data: await createImageScene(pages[i], w, h), order: 0 });
+        created.push({ id: newId(), name: `${baseName} ${from + i}쪽`.slice(0, 100), data: await createImageScene(pages[i], w, h, docOf(i)), order: 0 });
       }
       insertScenesAfterCurrent(created);
       toast.success(`슬라이드 ${created.length}장을 만들었습니다.`, { id: toastId });
@@ -1280,8 +1431,13 @@ export default function App() {
     if (!force && prev && prev.id === sc.id && prev.data === sc.data && prev.bg === bg) return;
     castSentRef.current = { id: sc.id, data: sc.data, bg };
     const c = whiteboardRef.current?.getCanvas();
-    caster.send({ type: 'scene', sceneId: sc.id, index: idx, total: list.length, name: sc.name, data: sc.data, bg, origin: coordOrigin(c ?? { width: 0, height: 0 }), view: currentView() });
+    caster.send({ type: 'scene', sceneId: sc.id, index: idx, total: list.length, name: sc.name, data: sc.data, bg, origin: coordOrigin(c ?? { width: 0, height: 0 }), view: currentView(), lesson: projectNameRef.current, allowSave: castAllowSaveRef.current });
   }, [currentView]);
+
+  const [castAllowSave, setCastAllowSave] = useState(() => { try { return localStorage.getItem('okssam_cast_allow_save') !== '0'; } catch { return true; } });
+  const castAllowSaveRef = useRef(castAllowSave);
+  const projectNameRef = useRef(projectName);
+  projectNameRef.current = projectName;
 
   const startCast = useCallback(() => {
     casterRef.current?.stop();
@@ -1413,11 +1569,13 @@ export default function App() {
   // =====================================================================
   // 녹화
   // =====================================================================
+  const sceneLabelRef = useRef<(id: string) => string>(() => '');
   const sceneLabel = useCallback((id: string) => {
     const i = scenesRef.current.findIndex(s => s.id === id);
     const s = scenesRef.current[i];
     return s ? `${i + 1}. ${s.name}` : '슬라이드';
   }, []);
+  sceneLabelRef.current = sceneLabel;
 
   const startRecording = useCallback(async (opts: { mic: boolean; camera: boolean }) => {
     const wb = whiteboardRef.current;
@@ -1523,11 +1681,12 @@ export default function App() {
 
       {!isPresenting && (
       <TopNavBar
+        studentMode={studentMode}
         projectName={projectName}
         onRenameProject={name => { setProjectName(name); markDirty(); }}
         onSave={() => { void saveToBrowser(!driveOnRef.current); if (driveOnRef.current) void saveToDrive({ manual: true }); }}
         onLoad={handleLoadFromBrowser}
-        onOpenHistory={() => setHistoryOpen(true)}
+        onOpenHistory={() => { setHistoryLesson(lessonRef.current.lessonId); setHistoryOpen(true); }}
         onExportFile={handleExportFile}
         onImportFile={() => projectFileInputRef.current?.click()}
         onExportPDF={() => handleExportPDF('all')}
@@ -1587,6 +1746,8 @@ export default function App() {
           sceneRevision={sceneRevision}
           onCanvasChange={handleCanvasChange}
           onViewChange={handleViewChange}
+          onClip={url => setClipImage(url)}
+          onFlashCardAdded={() => toast.success('가림 카드를 만들었습니다.', { id: 'flash-added', description: '아무 도구로나 카드를 누르면 뒤집힙니다. 다 만들면 [공부·복습 → 플래시카드 복습]', duration: 3000 })}
           onMagnifyDone={() => { setActiveTool('pen'); toast.success('확대 사본을 옆에 놓았습니다.', { description: '펜으로 바로 판서할 수 있습니다. 선택 도구로 크기·위치를 바꿀 수 있습니다.', duration: 2500 }); }}
           onLaser={handleLaser}
           onSelectionChange={setMediaSelection}
@@ -1625,6 +1786,9 @@ export default function App() {
         onCopy={() => whiteboardRef.current?.copy()}
         onPaste={() => whiteboardRef.current?.paste()}
         onCut={() => whiteboardRef.current?.cut()}
+        onStartReview={() => { void startReview(); }}
+        onOpenStudy={() => setStudyOpen(true)}
+        studentMode={studentMode}
       />
 
       <LayerPanel
@@ -1804,30 +1968,35 @@ export default function App() {
         onCanvasBackgroundChange={handleCanvasBackgroundChange}
         isVertical={isVertical}
         onToggleOrientation={() => setIsVertical(v => !v)}
+        studentMode={studentMode}
+        onStudentMode={on => { setStudentMode(on); saveStudentMode(on); toast.success(on ? '학생 모드를 켰습니다.' : '학생 모드를 껐습니다.', on ? { description: '왼쪽 [공부 도구]에서 오답 모으기·가림 카드·복습·공부 기록을 씁니다.' } : undefined); }}
+      />
+      <ClipSaveModal image={clipImage} source={`${projectName} · ${sceneLabel(activeSceneId)}`} onClose={() => setClipImage(null)} onSave={saveClip} />
+      <StudyLogModal isOpen={studyOpen} onClose={() => setStudyOpen(false)} focus={focus} onStartFocus={startFocus} />
+      {focus && <FocusChip focus={focus} onPause={togglePauseFocus} onStop={() => { setFocus(null); toast('집중 타이머를 끝냈습니다.'); }} />}
+      <FlashReviewBar
+        card={review && !review.done ? { index: review.i + 1, total: review.queue.length, slide: sceneLabel(review.queue[review.i].sceneId), revealed: review.revealed, box: review.queue[review.i].box } : null}
+        done={review?.done ? { known: review.known, again: review.again } : null}
+        onReveal={revealCard}
+        onKnown={() => gradeCard(true)}
+        onAgain={() => gradeCard(false)}
+        onClose={() => setReview(null)}
       />
 
-      <LessonHistoryModal isOpen={historyOpen} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
-      <DriveLessonsModal
+      <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
+      <LessonDashboard
         isOpen={lessonsOpen}
         onClose={() => setLessonsOpen(false)}
-        enabled={driveOn}
-        onEnable={enableDrive}
-        onDisable={disableDrive}
-        list={listDriveLessons}
-        currentFileId={lessonRef.current.fileId}
-        onOpenLesson={l => {
-          if (dirtyRef.current || driveDirtyRef.current) {
-            setConfirmState({
-              title: `'${l.name}'을(를) 열까요?`,
-              message: '지금 화면의 수업은 먼저 저장한 뒤 바뀝니다.',
-              confirmLabel: '열기',
-              onConfirm: async () => { await saveToBrowser(false); if (driveOnRef.current) await saveToDrive({}); void openDriveLesson(l); },
-            });
-          } else void openDriveLesson(l);
-        }}
-        onNewLesson={newLesson}
-        onSaveNow={() => void saveToDrive({ manual: true })}
-        status={{ off: '꺼짐', synced: '저장됨', saving: '저장하는 중…', pending: '저장 대기', 'need-auth': '다시 연결 필요', error: '저장 오류', conflict: '확인 필요' }[driveState]}
+        currentLessonId={lessonRef.current.lessonId}
+        onCurrentRenamed={name => { setProjectName(name); markDirty(); }}
+        onCurrentCategory={c => { lessonRef.current.category = c; markDirty(); }}
+        saveCurrent={async () => { if (dirtyRef.current) await saveRef.current(false); }}
+        onOpen={id => { void openLocalLesson(id); }}
+        onNew={c => { void newLesson(c); }}
+        onImportFile={() => projectFileInputRef.current?.click()}
+        onShowHistory={id => { setHistoryLesson(id); setHistoryOpen(true); }}
+        onCurrentTrashed={() => { dirtyRef.current = false; void newLesson(undefined, { skipSave: true }); }}
+        drive={{ on: driveOn, state: driveState, enable: enableDrive, disable: disableDrive, list: listDriveLessons, open: l => { void openDriveLesson(l); } }}
       />
       <StudentCastModal
         isOpen={castOpen}
@@ -1839,6 +2008,8 @@ export default function App() {
         count={cast.count}
         onStart={startCast}
         onStop={stopCast}
+        allowSave={castAllowSave}
+        onAllowSave={v => { setCastAllowSave(v); castAllowSaveRef.current = v; try { localStorage.setItem('okssam_cast_allow_save', v ? '1' : '0'); } catch { /* 무시 */ } castSentRef.current = null; }}
       />
       <PdfImportModal
         isOpen={!!pendingPdf}

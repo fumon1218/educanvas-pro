@@ -11,10 +11,11 @@ import {
   fileToDataURL,
 } from '@/src/lib/canvasData';
 import { toast } from 'sonner';
+import { PressureBrush, getPenSettings, notePointer } from '@/src/lib/pen';
 
 export type ToolType =
   | 'pen' | 'eraser' | 'laser' | 'select' | 'lasso' | 'pencil' | 'fountain' | 'ballpoint'
-  | 'dashed' | 'bucket' | 'highlighter' | 'pan' | 'eyedropper' | 'magnify';
+  | 'dashed' | 'bucket' | 'highlighter' | 'pan' | 'eyedropper' | 'magnify' | 'clip' | 'flashcard';
 
 import { drawBackground, isDarkBackground, backgroundColor, type CanvasBackground } from '@/src/lib/backgrounds';
 export type { CanvasBackground } from '@/src/lib/backgrounds';
@@ -67,6 +68,10 @@ interface WhiteboardProps {
   onViewChange?: () => void;
   /** 확대 사본을 만든 뒤 (펜으로 바꾸기 등) */
   onMagnifyDone?: () => void;
+  /** 오답 모으기: 끌어 감싼 영역 그림 */
+  onClip?: (dataUrl: string) => void;
+  /** 가림 카드를 하나 만들었을 때 */
+  onFlashCardAdded?: () => void;
   onColorPicked?: (color: string) => void;
   onDrawingStateChange?: (isDrawing: boolean) => void;
   onRequestTool?: (tool: ToolType) => void;
@@ -82,7 +87,7 @@ interface WhiteboardProps {
 export interface WhiteboardHandle {
   addText: (text?: string, options?: { width?: number }) => void;
   addFile: (file: File) => Promise<void>;
-  addImages: (dataUrls: string[]) => Promise<void>;
+  addImages: (dataUrls: string[], docs?: ({ docId: string; docPage: number } | null)[]) => Promise<void>;
   addWebLink: (url: string, clip?: { start?: number; end?: number }) => void;
   addShape: (type: 'rect' | 'circle' | 'ellipse' | 'triangle' | 'polygon' | 'line' | 'arrow') => void;
   /** ink: 잠긴 객체·PDF 배경은 남기고 판서만 지움 / all: 모두 지움 */
@@ -95,6 +100,12 @@ export interface WhiteboardHandle {
   getPageInfo: () => { index: number; total: number; pageNo: number; first: number; last: number } | null;
   /** PDF 쪽 번호로 이동 */
   goToPageNo: (n: number) => boolean;
+  /** 이 슬라이드의 가림 카드들 */
+  getFlashCards: () => { id: string; box: number; due: number }[];
+  /** 객체 하나를 화면 가득 보여 주기 */
+  focusObject: (id: string) => boolean;
+  /** 가림 카드 덮기/열기, 복습 단계 바꾸기 */
+  setFlash: (id: string, patch: { revealed?: boolean; box?: number; due?: number }) => void;
   getLaserCanvas: () => HTMLCanvasElement | null;
   /** 녹화용: [판서 캔버스, 그리는 중인 선 캔버스, 레이저 캔버스] */
   getRecordLayers: () => (HTMLCanvasElement | null)[];
@@ -128,6 +139,8 @@ export interface WhiteboardHandle {
 }
 
 const DRAWING_TOOLS: ToolType[] = ['pen', 'pencil', 'fountain', 'ballpoint', 'dashed', 'highlighter', 'lasso'];
+/** 애플 펜슬 필압을 쓰는 도구 (형광펜·점선·올가미는 일정한 굵기) */
+const PRESSURE_TOOLS: ToolType[] = ['pen', 'pencil', 'fountain', 'ballpoint'];
 const ERASABLE_TYPES = new Set(['path', 'i-text', 'text', 'textbox', 'rect', 'circle', 'ellipse', 'triangle', 'polygon', 'polyline', 'line']);
 const SHAPE_TYPES = new Set(['rect', 'circle', 'ellipse', 'triangle', 'polygon']);
 const TEXT_TYPES = new Set(['i-text', 'text', 'textbox']);
@@ -466,12 +479,12 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
 
   // ---------- 영역 확대 사본 ----------
   const magRef = useRef<{ x0: number; y0: number; rect: fabric.Rect } | null>(null);
-  const makeMagnified = useCallback(async (x: number, y: number, w: number, h: number) => {
+  /** 화면의 한 영역(장면 좌표)을 선명한 그림으로 (긴 변 약 1600px, 바탕색 포함) */
+  const cropRegion = useCallback(async (x: number, y: number, w: number, h: number): Promise<string | null> => {
     const canvas = fabricRef.current;
-    if (!canvas) return;
+    if (!canvas) return null;
     const v = canvas.viewportTransform;
     const z = v[0];
-    // 화면 좌표로 잘라 선명하게(긴 변 약 1600px) 그린다
     const sw = w * z, sh = h * z;
     const multiplier = Math.min(6, Math.max(1, 1600 / Math.max(sw, sh)));
     const helpers = canvas.getObjects().filter(o => isHelper(o));
@@ -490,7 +503,40 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     ctx.fillStyle = backgroundColor(backgroundRef.current);
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(base, 0, 0);
-    const img = await fabric.FabricImage.fromURL(c.toDataURL('image/jpeg', 0.92));
+    return c.toDataURL('image/jpeg', 0.92);
+  }, []);
+
+  /** 가림 카드: 영역을 덮는 카드. 누르면 뒤집혀 보이고 다시 누르면 덮인다 */
+  const makeFlashCard = useCallback((x: number, y: number, w: number, h: number) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const z = canvas.getZoom();
+    const rect = new fabric.Rect({ width: w, height: h, rx: 10 / z, ry: 10 / z, fill: '#fcd34d', stroke: '#d97706', strokeWidth: 2 / z, originX: 'center', originY: 'center' });
+    const fs = Math.max(10 / z, Math.min(h * 0.45, w * 0.22, 40 / z));
+    const label = new fabric.FabricText('?', { fontSize: fs * 1.4, fontWeight: 'bold', fill: '#92400e', fontFamily: KOREAN_FONT, originX: 'center', originY: 'center' });
+    const g = new fabric.Group([rect, label], { left: x + w / 2, top: y + h / 2, originX: 'center', originY: 'center', cornerColor: '#d97706', cornerSize: 10, transparentCorners: false, subTargetCheck: false });
+    (g as any).id = newId();
+    (g as any).isFlash = true;
+    (g as any).flashBox = 1;
+    (g as any).flashDue = 0;
+    canvas.add(g);
+    canvas.requestRenderAll();
+    propsRef.current.onFlashCardAdded?.();
+  }, []);
+
+  const makeClip = useCallback(async (x: number, y: number, w: number, h: number) => {
+    const url = await cropRegion(x, y, w, h);
+    if (url) propsRef.current.onClip?.(url);
+  }, [cropRegion]);
+
+  const makeMagnified = useCallback(async (x: number, y: number, w: number, h: number) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const v = canvas.viewportTransform;
+    const z = v[0];
+    const cropped = await cropRegion(x, y, w, h);
+    if (!cropped) return;
+    const img = await fabric.FabricImage.fromURL(cropped);
     // 원래 크기의 2배(화면의 70%를 넘지 않게), 화면 안에서 영역 오른쪽 또는 가운데
     const viewW = canvas.width / z, viewH = canvas.height / z;
     const scaleWorld = Math.min(2 * w, viewW * 0.7) / img.width;
@@ -511,7 +557,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     canvas.add(img);
     canvas.requestRenderAll();
     propsRef.current.onMagnifyDone?.();
-  }, []);
+  }, [cropRegion]);
 
   // ---------- 이어 붙인 PDF 쪽 ----------
   const stackedPages = useCallback(() => {
@@ -676,7 +722,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     commitChange();
   }, [commitChange]);
 
-  const handleImagesAdd = useCallback(async (dataUrls: string[]) => {
+  const handleImagesAdd = useCallback(async (dataUrls: string[], docs?: ({ docId: string; docPage: number } | null)[]) => {
     const canvas = fabricRef.current;
     if (!canvas || dataUrls.length === 0) return;
     const columns = Math.min(4, dataUrls.length);
@@ -697,6 +743,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         cornerColor: '#3b82f6', cornerSize: 10, transparentCorners: false,
       });
       (img as any).id = newId();
+      const d = docs?.[i];
+      if (d) { (img as any).docId = d.docId; (img as any).docPage = d.docPage; }
       canvas.add(img);
     });
     selectObjects(images);
@@ -704,6 +752,25 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
 
   // ---------- 외부 노출 메서드 ----------
   React.useImperativeHandle(ref, () => ({
+    getFlashCards: () => (fabricRef.current?.getObjects() || []).filter((o: any) => o.isFlash).map((o: any) => ({ id: o.id, box: o.flashBox || 1, due: o.flashDue || 0 })),
+    focusObject: (id: string) => {
+      const o = fabricRef.current?.getObjects().find((x: any) => x.id === id);
+      if (!o) return false;
+      const r = o.getBoundingRect();
+      const padW = r.width * 1.2, padH = r.height * 2.2;
+      fitRect({ left: r.left - (padW - r.width) / 2, top: r.top - (padH - r.height) / 2, width: padW, height: padH });
+      return true;
+    },
+    setFlash: (id: string, patch: { revealed?: boolean; box?: number; due?: number }) => {
+      const canvas = fabricRef.current;
+      const o: any = canvas?.getObjects().find((x: any) => x.id === id);
+      if (!canvas || !o) return;
+      if (patch.revealed !== undefined) { o.__revealed = patch.revealed; o.set({ opacity: patch.revealed ? 0.12 : 1 }); }
+      if (patch.box !== undefined) o.flashBox = patch.box;
+      if (patch.due !== undefined) o.flashDue = patch.due;
+      canvas.requestRenderAll();
+      if (patch.box !== undefined || patch.due !== undefined) commitChange();
+    },
     undo,
     redo,
     zoomIn: () => {
@@ -1011,7 +1078,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     deleteSelected: handleDeleteSelected,
     group: handleGroup,
     ungroup: handleUngroup,
-  }), [undo, redo, commitChange, applyToolState, selectObjects, fitToContent, stepPage, placeAtCenter, addAndSelect, getCanvas, handleImagesAdd, handleCopy, handlePaste, handleCut, handleDeleteSelected, handleGroup, handleUngroup]);
+  }), [undo, redo, commitChange, applyToolState, selectObjects, fitToContent, stepPage, placeAtCenter, addAndSelect, getCanvas, handleImagesAdd, handleCopy, handlePaste, handleCut, handleDeleteSelected, handleGroup, handleUngroup, fitRect]);
 
   // ---------- 캔버스 초기화 (한 번) ----------
   useEffect(() => {
@@ -1040,15 +1107,77 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
 
     container.style.touchAction = 'none';
     container.style.userSelect = 'none';
+    // 아이패드: 길게 누를 때 뜨는 메뉴·돋보기·글자 선택 막기
+    (container.style as any).webkitUserSelect = 'none';
+    (container.style as any).webkitTouchCallout = 'none';
     container.querySelectorAll('canvas').forEach(c => { (c as HTMLCanvasElement).style.touchAction = 'none'; });
 
     // --- 객체 이벤트 ---
     let lastVpt = '';
+    // --- 고화질 확대: PDF·한글 쪽을 확대하면 보이는 부분을 원본에서 선명하게 다시 그린다 ---
+    const hd = { timer: 0 as any, gen: 0, key: '' };
+    const installHd = (obj: any) => {
+      if (obj.__hdInstalled) return;
+      obj.__hdInstalled = true;
+      const orig = obj._render.bind(obj);
+      obj._render = function (ctx: CanvasRenderingContext2D) {
+        orig(ctx);
+        const h = this.__hd;
+        if (!h) return;
+        const w = this.width, ht = this.height;
+        ctx.drawImage(h.canvas, -w / 2 + h.r.u0 * w, -ht / 2 + h.r.v0 * ht, (h.r.u1 - h.r.u0) * w, (h.r.v1 - h.r.v0) * ht);
+      };
+    };
+    const dropHd = (obj: any) => { if (obj.__hd) { obj.__hd = null; obj.objectCaching = true; obj.dirty = true; } };
+    const runHd = async () => {
+      const gen = ++hd.gen;
+      const zoom = canvas.getZoom();
+      const dpr = window.devicePixelRatio || 1;
+      const inv = fabric.util.invertTransform(canvas.viewportTransform);
+      const tl = fabric.util.transformPoint(new fabric.Point(0, 0), inv);
+      const br = fabric.util.transformPoint(new fabric.Point(canvas.getWidth(), canvas.getHeight()), inv);
+      const { getRenderer } = await import('@/src/lib/hdRender');
+      for (const obj of canvas.getObjects() as any[]) {
+        if (gen !== hd.gen) return;
+        if (obj.type !== 'image' || !obj.docId || !obj.docPage || !obj.aCoords) continue;
+        if (obj.angle) { dropHd(obj); continue; }
+        const a = obj.aCoords;
+        const x0 = Math.min(a.tl.x, a.br.x), x1 = Math.max(a.tl.x, a.br.x), y0 = Math.min(a.tl.y, a.br.y), y1 = Math.max(a.tl.y, a.br.y);
+        const vx0 = Math.max(x0, tl.x), vx1 = Math.min(x1, br.x), vy0 = Math.max(y0, tl.y), vy1 = Math.min(y1, br.y);
+        const screenPerImagePx = (Math.abs(obj.scaleX) || 1) * zoom * dpr;
+        // 화면 밖이거나, 원래 그림으로도 충분히 선명하면 다시 그리지 않는다
+        if (vx1 <= vx0 || vy1 <= vy0 || screenPerImagePx <= 1.15) { dropHd(obj); continue; }
+        const W = x1 - x0, H = y1 - y0;
+        const m = 0.08; // 조금 옮겨도 바로 흐려지지 않게 여유
+        const r = {
+          u0: Math.max(0, (vx0 - x0) / W - m), v0: Math.max(0, (vy0 - y0) / H - m),
+          u1: Math.min(1, (vx1 - x0) / W + m), v1: Math.min(1, (vy1 - y0) / H + m),
+        };
+        if (obj.flipX) [r.u0, r.u1] = [1 - r.u1, 1 - r.u0];
+        if (obj.flipY) [r.v0, r.v1] = [1 - r.v1, 1 - r.v0];
+        const pxW = Math.ceil((r.u1 - r.u0) * W * zoom * dpr);
+        const cur = obj.__hd;
+        if (cur && cur.r.u0 <= r.u0 + 1e-3 && cur.r.v0 <= r.v0 + 1e-3 && cur.r.u1 >= r.u1 - 1e-3 && cur.r.v1 >= r.v1 - 1e-3 && cur.pxPerU >= (pxW / (r.u1 - r.u0)) * 0.9) continue;
+        const ren = await getRenderer(obj.docId);
+        if (!ren || gen !== hd.gen) continue;
+        let c: HTMLCanvasElement | null = null;
+        try { c = await ren.render(obj.docPage, r, pxW); } catch (e) { console.warn('고화질 다시 그리기 실패', e); }
+        if (!c || gen !== hd.gen || !canvas.getObjects().includes(obj)) continue;
+        installHd(obj);
+        obj.__hd = { canvas: c, r, pxPerU: c.width / (r.u1 - r.u0) };
+        obj.objectCaching = false; // 캐시는 해상도가 제한되므로 직접 그린다
+        obj.dirty = true;
+        canvas.requestRenderAll();
+      }
+    };
+    const scheduleHd = () => { clearTimeout(hd.timer); hd.timer = setTimeout(() => { void runHd(); }, 260); };
     canvas.on('after:render', () => {
       paintBackground();
       const v = canvas.viewportTransform;
       const k = v ? `${v[0]}|${v[4]}|${v[5]}|${canvas.width}|${canvas.height}` : '';
       if (k !== lastVpt) { lastVpt = k; propsRef.current.onViewChange?.(); }
+      const hk = `${k}|${canvas.getObjects().length}`;
+      if (hk !== hd.key) { hd.key = hk; scheduleHd(); }
     });
     canvas.on('object:added', e => {
       const obj = e.target;
@@ -1164,12 +1293,13 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       propsRef.current.onDrawingStateChange?.(true);
       const t = toolRef.current;
       const e: any = opt.e;
-      if (t === 'magnify' && !pan.spaceDown) {
+      if ((t === 'magnify' || t === 'clip' || t === 'flashcard') && !pan.spaceDown) {
         const p0 = canvas.getScenePoint(e);
         const z = canvas.getZoom();
+        const col = t === 'clip' ? ['rgba(239,68,68,0.08)', '#ef4444'] : t === 'flashcard' ? ['rgba(245,158,11,0.15)', '#d97706'] : ['rgba(99,102,241,0.08)', '#6366f1'];
         const rect = new fabric.Rect({
           left: p0.x, top: p0.y, width: 1, height: 1, originX: 'left', originY: 'top',
-          fill: 'rgba(99,102,241,0.08)', stroke: '#6366f1', strokeWidth: 2 / z, strokeDashArray: [8 / z, 6 / z],
+          fill: col[0], stroke: col[1], strokeWidth: 2 / z, strokeDashArray: [8 / z, 6 / z],
           selectable: false, evented: false, excludeFromExport: true, objectCaching: false,
         });
         magRef.current = { x0: p0.x, y0: p0.y, rect };
@@ -1257,7 +1387,12 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         isDrawingRef.current = false;
         propsRef.current.onDrawingStateChange?.(false);
         const w = rect.width, h = rect.height;
-        if (w * canvas.getZoom() > 12 && h * canvas.getZoom() > 12) void makeMagnified(rect.left, rect.top, w, h);
+        if (w * canvas.getZoom() > 12 && h * canvas.getZoom() > 12) {
+          const t = toolRef.current;
+          if (t === 'clip') void makeClip(rect.left, rect.top, w, h);
+          else if (t === 'flashcard') makeFlashCard(rect.left, rect.top, w, h);
+          else void makeMagnified(rect.left, rect.top, w, h);
+        }
         return;
       }
       const wasPanning = pan.dragging;
@@ -1379,26 +1514,101 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
     };
     let lastPenTime = 0;
+    // 펜(애플 펜슬)을 한 번이라도 쓰면, 그 뒤로 손가락 한 개는 그리지 않고 화면만 옮긴다
+    let penSeen = false;
+    const fingerPan = { id: -1, x: 0, y: 0 };
+    const hoverDot = document.createElement('div');
+    hoverDot.setAttribute('aria-hidden', 'true');
+    hoverDot.style.cssText = 'position:absolute;left:0;top:0;border-radius:9999px;pointer-events:none;z-index:30;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 1px rgba(255,255,255,.9);';
+    container.appendChild(hoverDot);
+    const drawingNow = () => canvas.isDrawingMode || ['eraser', 'laser', 'rect', 'circle', 'triangle', 'line', 'arrow', 'text', 'bucket', 'magnify', 'clip', 'flashcard'].includes(toolRef.current as string);
+    const fingerPansNow = () => penSeen && getPenSettings().fingerPans && drawingNow();
+    const onPenFirstSeen = () => {
+      if (penSeen) return;
+      penSeen = true;
+      try {
+        if (!sessionStorage.getItem('okssam_pen_toast')) {
+          sessionStorage.setItem('okssam_pen_toast', '1');
+          if (getPenSettings().fingerPans) toast('애플 펜슬을 쓰고 있습니다.', { description: '펜으로는 쓰고, 손가락으로는 화면을 옮기거나 두 손가락으로 확대합니다. (설정에서 바꿀 수 있습니다)', duration: 6000 });
+        }
+      } catch { /* 무시 */ }
+    };
+    const showHover = (e: PointerEvent) => {
+      if (!canvas.isDrawingMode) { hoverDot.style.display = 'none'; return; }
+      const rect = container.getBoundingClientRect();
+      const size = Math.max(4, (canvas.freeDrawingBrush?.width || 4) * canvas.getZoom());
+      hoverDot.style.width = hoverDot.style.height = `${size}px`;
+      hoverDot.style.background = (canvas.freeDrawingBrush?.color as string) || '#000';
+      hoverDot.style.opacity = '0.55';
+      hoverDot.style.left = `${e.clientX - rect.left}px`;
+      hoverDot.style.top = `${e.clientY - rect.top}px`;
+      hoverDot.style.display = 'block';
+    };
+    const flipFlashAt = (e: PointerEvent): boolean => {
+      const t = toolRef.current;
+      if (t === 'select' || t === 'eraser' || t === 'lasso' || t === 'flashcard') return false;
+      if (e.pointerType === 'touch' && fingerPansNow()) return false;
+      const rect = canvas.upperCanvasEl.getBoundingClientRect();
+      const sp = fabric.util.transformPoint(new fabric.Point(e.clientX - rect.left, e.clientY - rect.top), fabric.util.invertTransform(canvas.viewportTransform));
+      const objs = canvas.getObjects() as any[];
+      for (let i = objs.length - 1; i >= 0; i--) {
+        const o = objs[i];
+        if (o.isFlash && o.visible && o.containsPoint(sp)) {
+          o.__revealed = !o.__revealed;
+          o.set({ opacity: o.__revealed ? 0.12 : 1 });
+          canvas.requestRenderAll();
+          return true;
+        }
+      }
+      return false;
+    };
     const blockPenHover = (e: any) => {
+      notePointer(e);
+      if (e.type === 'pointerdown' && (e.buttons || e.pointerType !== 'pen' || e.pressure > 0) && flipFlashAt(e)) { e.stopPropagation(); e.preventDefault(); return; }
       if (e.pointerType === 'pen') {
         lastPenTime = Date.now();
-        if (e.pressure === 0 || e.buttons === 0) { e.stopPropagation(); e.preventDefault(); }
-      } else if (e.pointerType === 'touch' && Date.now() - lastPenTime < 1500) {
-        e.stopPropagation(); // 펜 사용 직후 손바닥 터치 무시
+        onPenFirstSeen();
+        if (e.pressure === 0 || e.buttons === 0) {
+          // 펜을 화면에 대지 않고 띄워 둔 상태(호버): 어디에 써질지 점으로 보여 준다
+          if (e.type === 'pointermove') showHover(e);
+          e.stopPropagation(); e.preventDefault();
+        } else hoverDot.style.display = 'none';
+      } else if (e.pointerType === 'touch') {
+        if (fingerPansNow()) {
+          // 손가락 한 개 = 화면 옮기기 (그리지 않음)
+          e.stopPropagation();
+          if (e.type === 'pointerdown' && fingerPan.id === -1) { fingerPan.id = e.pointerId; fingerPan.x = e.clientX; fingerPan.y = e.clientY; }
+          else if (e.type === 'pointermove' && e.pointerId === fingerPan.id && !touch.multi) {
+            canvas.relativePan(new fabric.Point(e.clientX - fingerPan.x, e.clientY - fingerPan.y));
+            fingerPan.x = e.clientX; fingerPan.y = e.clientY;
+            canvas.requestRenderAll();
+            propsRef.current.onViewChange?.();
+          }
+          return;
+        }
+        if (Date.now() - lastPenTime < 1500) e.stopPropagation(); // 펜 사용 직후 손바닥 터치 무시
       }
     };
+    const endFingerPan = (e: PointerEvent) => {
+      if (e.pointerId === fingerPan.id) { fingerPan.id = -1; forceRender(n => n + 1); }
+      if (e.pointerType === 'pen') hoverDot.style.display = 'none';
+    };
+    const hideHover = () => { hoverDot.style.display = 'none'; };
     const blockPalm = (e: TouchEvent) => {
       let stylus = false;
       for (let i = 0; i < e.touches.length; i++) {
-        if ((e.touches[i] as any).touchType === 'stylus') { stylus = true; lastPenTime = Date.now(); }
+        if ((e.touches[i] as any).touchType === 'stylus') { stylus = true; lastPenTime = Date.now(); onPenFirstSeen(); }
       }
-      if (e.touches.length === 1 && !stylus && Date.now() - lastPenTime < 1500) e.stopPropagation();
+      if (e.touches.length === 1 && !stylus && (fingerPansNow() || Date.now() - lastPenTime < 1500)) e.stopPropagation();
     };
     const cap = { capture: true, passive: false } as AddEventListenerOptions;
     container.addEventListener('pointerdown', blockPenHover, cap);
     container.addEventListener('pointermove', blockPenHover, cap);
     container.addEventListener('touchstart', blockPalm, cap);
     container.addEventListener('touchmove', blockPalm, cap);
+    container.addEventListener('pointerup', endFingerPan, true);
+    container.addEventListener('pointercancel', endFingerPan, true);
+    container.addEventListener('pointerleave', hideHover);
     container.addEventListener('touchstart', onTouchStart, { passive: false });
     container.addEventListener('touchmove', onTouchMove, { passive: false });
     container.addEventListener('touchend', onTouchEnd);
@@ -1423,6 +1633,11 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       container.removeEventListener('pointermove', blockPenHover, cap);
       container.removeEventListener('touchstart', blockPalm, cap);
       container.removeEventListener('touchmove', blockPalm, cap);
+      container.removeEventListener('pointerup', endFingerPan, true);
+      container.removeEventListener('pointercancel', endFingerPan, true);
+      container.removeEventListener('pointerleave', hideHover);
+      hoverDot.remove();
+      clearTimeout(hd.timer);
       container.removeEventListener('touchstart', onTouchStart);
       container.removeEventListener('touchmove', onTouchMove);
       container.removeEventListener('touchend', onTouchEnd);
@@ -1497,7 +1712,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       }
     }
     if (canvas.isDrawingMode) {
-      const brush = canvas.freeDrawingBrush instanceof fabric.PencilBrush ? canvas.freeDrawingBrush : new fabric.PencilBrush(canvas);
+      const brush = canvas.freeDrawingBrush instanceof PressureBrush ? canvas.freeDrawingBrush : new PressureBrush(canvas);
+      brush.pressureEnabled = getPenSettings().pressure && PRESSURE_TOOLS.includes(tool);
       const hex = color.startsWith('#') && color.length === 7;
       let width = brushSize, c = color;
       let cap: CanvasLineCap = 'round', join: CanvasLineJoin = 'round';

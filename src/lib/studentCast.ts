@@ -7,7 +7,7 @@ import Peer, { type DataConnection } from 'peerjs';
 export interface CastView { x: number; y: number; w: number; h: number }
 
 export type CastMessage =
-  | { type: 'scene'; sceneId: string; index: number; total: number; name: string; data: string | null; bg: string; origin: { x: number; y: number }; view: CastView }
+  | { type: 'scene'; sceneId: string; index: number; total: number; name: string; data: string | null; bg: string; origin: { x: number; y: number }; view: CastView; lesson?: string; allowSave?: boolean }
   | { type: 'view'; view: CastView }
   | { type: 'laser'; x: number; y: number }
   | { type: 'poll'; poll: Poll | null }

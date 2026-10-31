@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
-import { Loader2, MonitorSmartphone, WifiOff, Hand, Check } from 'lucide-react';
+import { Loader2, MonitorSmartphone, WifiOff, Hand, Check, Download, Image as ImageIcon, FileDown } from 'lucide-react';
 import { loadCanvasData } from '@/src/lib/canvasData';
 import { drawBackground, isBackgroundId, type CanvasBackground } from '@/src/lib/backgrounds';
 import { watchCast, type CastView, type Poll, type StudentMessage } from '@/src/lib/studentCast';
@@ -36,6 +36,13 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
   const [poll, setPoll] = useState<Poll | null>(null);
   const [answer, setAnswer] = useState<string | null>(null);
   const send = (m: StudentMessage) => sendRef.current(m);
+  // 판서 받아 가기: 선생님이 보여 준 슬라이드를 모아 둔다 (선생님이 허락한 경우)
+  const slidesRef = useRef(new Map<string, { index: number; name: string; data: string | null; bg: CanvasBackground; origin: { x: number; y: number } }>());
+  const [allowSave, setAllowSave] = useState(false);
+  const [lesson, setLesson] = useState('');
+  const [saveMenu, setSaveMenu] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [seenCount, setSeenCount] = useState(0);
   const who = () => nameRef.current || '학생';
 
   const layout = () => {
@@ -74,6 +81,10 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
         }
         if (m.type === 'scene') {
           stateRef.current = { bg: isBackgroundId(m.bg) ? m.bg : 'blank', origin: m.origin, view: m.view };
+          setAllowSave(m.allowSave !== false);
+          if (m.lesson) setLesson(m.lesson);
+          slidesRef.current.set(m.sceneId, { index: m.index, name: m.name, data: m.data, bg: stateRef.current.bg, origin: m.origin });
+          setSeenCount(slidesRef.current.size);
           setLabel(`${m.index + 1} / ${m.total}${m.name ? ` · ${m.name}` : ''}`);
           const token = ++loadToken.current;
           await loadCanvasData(fc, m.data);
@@ -100,6 +111,62 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
     const t = setTimeout(() => setLaser(null), 1200);
     return () => clearTimeout(t);
   }, [laser]);
+
+  const fileBase = () => (lesson || '수업').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60);
+  const download = (url: string, name: string) => { const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
+
+  /** 지금 보이는 화면을 그림으로 */
+  const saveCurrent = () => {
+    const fc = fcRef.current, bg = bgRef.current;
+    if (!fc || !bg) return;
+    const c = document.createElement('canvas');
+    c.width = bg.width; c.height = bg.height;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(bg, 0, 0);
+    ctx.drawImage(fc.getElement(), 0, 0, c.width, c.height);
+    download(c.toDataURL('image/png'), `${fileBase()}_${label.split(' ')[0] || ''}쪽.png`.replace('_쪽', ''));
+    setSaveMenu(false);
+  };
+
+  /** 지금까지 본 슬라이드를 모두 PDF로 (판서 포함) */
+  const savePdf = async () => {
+    setSaving(true);
+    try {
+      const { jsPDF } = await import('jspdf');
+      const list = [...slidesRef.current.values()].sort((a, b) => a.index - b.index);
+      let pdf: InstanceType<typeof jsPDF> | null = null;
+      for (const sl of list) {
+        const W = 1600, H = 1000;
+        const el = document.createElement('canvas');
+        const sc = new fabric.StaticCanvas(el, { width: W, height: H, enableRetinaScaling: false, renderOnAddRemove: false });
+        await loadCanvasData(sc, sl.data);
+        const objs = sc.getObjects();
+        let vpt: fabric.TMat2D = [1, 0, 0, 1, 0, 0];
+        if (objs.length) {
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          objs.forEach(o => { const r = o.getBoundingRect(); x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top); x1 = Math.max(x1, r.left + r.width); y1 = Math.max(y1, r.top + r.height); });
+          const pad = 30, w = x1 - x0 + pad * 2, h = y1 - y0 + pad * 2;
+          const z = Math.min(W / w, H / h);
+          vpt = [z, 0, 0, z, W / 2 - (x0 + x1) / 2 * z, H / 2 - (y0 + y1) / 2 * z];
+        }
+        sc.setViewportTransform(vpt);
+        sc.renderAll();
+        const out = document.createElement('canvas');
+        out.width = W; out.height = H;
+        const ctx = out.getContext('2d')!;
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+        drawBackground(ctx, sl.bg, W, H, vpt as number[], 1, sl.origin);
+        ctx.drawImage(sc.getElement(), 0, 0);
+        sc.dispose();
+        if (!pdf) pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [W, H] });
+        else pdf.addPage([W, H], 'landscape');
+        pdf.addImage(out.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, W, H);
+      }
+      if (pdf) pdf.save(`${fileBase()}_판서.pdf`);
+    } catch (e) { console.error(e); alert('PDF를 만들지 못했습니다.'); }
+    finally { setSaving(false); setSaveMenu(false); }
+  };
 
   const vpt = fcRef.current?.viewportTransform;
   const laserPos = laser && vpt ? { left: laser.x * vpt[0] + vpt[4], top: laser.y * vpt[3] + vpt[5] } : null;
@@ -160,6 +227,19 @@ export const StudentView: React.FC<{ code: string }> = ({ code }) => {
         >
           {hand ? <Check size={16} /> : <Hand size={16} />}{hand ? '손 든 중' : '손들기'}
         </button>
+        {allowSave && hasScene && (
+          <div className="relative">
+            <button onClick={() => setSaveMenu(v => !v)} className="flex items-center gap-1.5 h-9 px-3 rounded-xl font-semibold bg-white ring-1 ring-slate-200 text-slate-700" aria-expanded={saveMenu} aria-haspopup="menu">
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}판서 받아 가기
+            </button>
+            {saveMenu && (
+              <div role="menu" className="absolute bottom-11 left-0 w-60 p-1 rounded-xl bg-white shadow-xl ring-1 ring-slate-900/10 text-[13px]">
+                <button role="menuitem" onClick={saveCurrent} className="w-full h-10 px-3 rounded-lg flex items-center gap-2 hover:bg-slate-100 text-left"><ImageIcon size={15} />지금 화면 (그림)</button>
+                <button role="menuitem" onClick={() => { void savePdf(); }} disabled={saving} className="w-full h-10 px-3 rounded-lg flex items-center gap-2 hover:bg-slate-100 text-left"><FileDown size={15} />지금까지 본 슬라이드 {seenCount}장 (PDF)</button>
+              </div>
+            )}
+          </div>
+        )}
         <span className="ml-auto tabular-nums truncate">{label}</span>
       </div>
     </div>

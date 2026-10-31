@@ -49,6 +49,7 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 | cfb | 옛 워드 .doc 읽기 | Apache-2.0 |
 | html-to-image | 문서 화면을 그림으로 | MIT |
 | JSZip | 키노트·페이지스 파일 열기 | MIT (MIT 또는 GPL-3.0 중 MIT 선택) |
+| perfect-freehand | 애플 펜슬 필압 선 | MIT |
 
 ## 악보 기능
 
