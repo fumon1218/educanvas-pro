@@ -91,3 +91,9 @@ firebase deploy --only firestore:rules
 - 악보 연주용 악기 소리는 처음 재생할 때 인터넷(gleitz.github.io 사운드폰트)에서 받아 옵니다.
 
 변경 내역은 [CHANGELOG.md](CHANGELOG.md), 사용한 오픈소스는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 보세요.
+
+## 시험할 때 지킬 규칙
+
+- 배포된 앱에서 무엇이든 시험할 때는 **반드시 주소 끝에 `?test=1`** 을 붙여 시험 모드로 엽니다. 시험 모드는 실제 수업과 분리된 저장소(`educanvas-test`, `okssam-assets-test`)를 쓰고 구글 드라이브를 켜지 않습니다.
+- 선생님의 브라우저 저장소·드라이브·수업 파일에 쓰는 시험은 하지 않습니다. 자동 시험은 시험용 빌드(로컬 미리보기)에서만 합니다.
+- 그래도 덮어쓰기가 일어나면 파일 → [수업 기록]에서 되살릴 수 있습니다.

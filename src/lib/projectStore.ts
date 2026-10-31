@@ -1,3 +1,4 @@
+import { storeName } from './testMode';
 /**
  * 브라우저 IndexedDB 저장소. localStorage(약 5MB)와 달리 PDF 이미지가 많은
  * 수업 자료도 저장할 수 있다.
@@ -28,7 +29,7 @@ export interface StoredProject {
   assets?: { models: PackedModel[] };
 }
 
-const DB_NAME = 'educanvas';
+const DB_NAME = storeName('educanvas');
 const STORE = 'projects';
 const KEY = 'current';
 
@@ -43,47 +44,153 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-const PREV_KEY = 'previous';
-
 /** 수업 번호가 없던 예전 저장본은 저장 시각으로 같은 수업인지 알아본다 */
 export const legacyLessonId = (p: { savedAt?: string }) => 'legacy-' + (p.savedAt || '');
+const lessonOf = (p: StoredProject) => p.lessonId || legacyLessonId(p);
 
 const hasContent = (p: StoredProject | null | undefined) =>
   !!p?.scenes?.some(s => { try { return !!s.data && JSON.parse(s.data).objects?.length > 0; } catch { return false; } });
 
-/**
- * 이 브라우저에 저장. 다른 수업을 저장하려고 하면, 원래 있던 수업은 '직전 수업'으로 한 칸 보관한다
- * (이전 수업을 이어서 하지 않고 새로 시작해도 예전 수업이 사라지지 않게).
- */
-export async function saveProject(project: StoredProject): Promise<void> {
-  const db = await openDB();
-  await new Promise<void>((resolve, reject) => {
+// ---------------------------------------------------------------------------
+// 수업 기록 (자동 보관)
+//  - 다른 수업을 저장하면 원래 수업을 보관한다 ('다른 수업으로 바뀌기 전')
+//  - 같은 수업도 20분마다 한 번씩 그때 모습을 보관한다 ('자동 보관')
+//  - 최근 15개까지. 무엇을 해도 저장된 수업이 한 번에 사라지지 않게 한다.
+// ---------------------------------------------------------------------------
+
+export type HistoryReason = 'replaced' | 'snapshot' | 'before-restore';
+export interface HistoryEntry {
+  id: string;
+  name: string;
+  savedAt: string;
+  keptAt: string;
+  slides: number;
+  reason: HistoryReason;
+  lessonId: string;
+}
+const INDEX_KEY = 'history-index';
+const OLD_PREV_KEY = 'previous';
+const MAX_HISTORY = 15;
+const SNAPSHOT_EVERY_MS = 20 * 60 * 1000;
+
+const reqP = <T,>(r: IDBRequest<T>) => new Promise<T>((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+
+/** 같은 트랜잭션 안에서 기록 한 칸 추가 + 오래된 것 정리 */
+function pushHistory(store: IDBObjectStore, index: HistoryEntry[], p: StoredProject, reason: HistoryReason): HistoryEntry[] {
+  const id = `history-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  store.put(p, id);
+  const next = [{ id, name: p.name || '수업', savedAt: p.savedAt, keptAt: new Date().toISOString(), slides: p.scenes?.length || 0, reason, lessonId: lessonOf(p) }, ...index];
+  for (const old of next.slice(MAX_HISTORY)) store.delete(old.id);
+  return next.slice(0, MAX_HISTORY);
+}
+
+const runTx = (db: IDBDatabase, fn: (store: IDBObjectStore, tx: IDBTransaction) => Promise<void> | void) =>
+  new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    const store = tx.objectStore(STORE);
-    const cur = store.get(KEY);
-    cur.onsuccess = () => {
-      const old = cur.result as StoredProject | undefined;
-      if (old && hasContent(old) && (old.lessonId || legacyLessonId(old)) !== project.lessonId) store.put(old, PREV_KEY);
-      store.put(project, KEY);
-    };
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
+    Promise.resolve(fn(tx.objectStore(STORE), tx)).catch(err => { try { tx.abort(); } catch { /* 무시 */ } reject(err); });
   });
-  db.close();
+
+/** 덮어쓰기 전에 필요하면 지금 저장본을 수업 기록에 보관 */
+async function keepHistoryBefore(db: IDBDatabase, project: StoredProject) {
+  await runTx(db, async store => {
+    const [oldRaw, idxRaw, prevRaw] = await Promise.all([reqP(store.get(KEY)), reqP(store.get(INDEX_KEY)), reqP(store.get(OLD_PREV_KEY))]);
+    const old = oldRaw as StoredProject | undefined;
+    let index = (idxRaw as HistoryEntry[] | undefined) || [];
+    const before = index.length;
+    // v0.9.1의 '직전 수업' 한 칸을 기록으로 옮긴다
+    if (prevRaw) { index = pushHistory(store, index, prevRaw as StoredProject, 'replaced'); store.delete(OLD_PREV_KEY); }
+    if (old && hasContent(old)) {
+      if (lessonOf(old) !== project.lessonId) index = pushHistory(store, index, old, 'replaced');
+      else {
+        const last = index.find(h => h.lessonId === lessonOf(old));
+        if (Date.now() - (last ? Date.parse(last.keptAt) : 0) > SNAPSHOT_EVERY_MS) index = pushHistory(store, index, old, 'snapshot');
+      }
+    }
+    if (index.length !== before || prevRaw) store.put(index, INDEX_KEY);
+  });
 }
 
-/** which='previous': 다른 수업에 덮여 한 칸 보관된 직전 수업 */
-export async function loadProject(which: 'current' | 'previous' = 'current'): Promise<StoredProject | null> {
+/** 저장 공간이 모자랄 때: 오래된 기록 절반을 지운다 (자동 보관만, 지금 수업은 건드리지 않음) */
+async function trimHistory(db: IDBDatabase) {
+  await runTx(db, async store => {
+    const index = ((await reqP(store.get(INDEX_KEY))) as HistoryEntry[] | undefined) || [];
+    const keep = index.slice(0, Math.floor(index.length / 2));
+    for (const h of index.slice(keep.length)) store.delete(h.id);
+    store.put(keep, INDEX_KEY);
+  });
+}
+
+/**
+ * 이 브라우저에 저장. 덮어쓰기 전에 원래 수업을 수업 기록에 보관한다.
+ * 보관이 실패해도(저장 공간 부족 등) 지금 수업 저장은 반드시 한다.
+ */
+export async function saveProject(project: StoredProject): Promise<void> {
+  const db = await openDB();
+  try {
+    try { await keepHistoryBefore(db, project); }
+    catch (e) { console.warn('수업 기록 보관 실패', e); try { await trimHistory(db); } catch { /* 무시 */ } }
+    const put = () => runTx(db, store => { store.put(project, KEY); });
+    try { await put(); }
+    catch (e) {
+      // 공간이 모자라면 오래된 기록을 줄이고 한 번 더
+      await trimHistory(db).catch(() => {});
+      await put();
+    }
+  } finally { db.close(); }
+}
+
+export async function loadProject(): Promise<StoredProject | null> {
   const db = await openDB();
   const result = await new Promise<StoredProject | null>((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(which === 'previous' ? PREV_KEY : KEY);
+    const req = tx.objectStore(STORE).get(KEY);
     req.onsuccess = () => resolve((req.result as StoredProject) || null);
     req.onerror = () => reject(req.error);
   });
   db.close();
   return result;
+}
+
+/** 수업 기록 목록 (최근 것부터). 예전 '직전 수업'도 함께 보여 준다 */
+export async function listHistory(): Promise<HistoryEntry[]> {
+  const db = await openDB();
+  const tx = db.transaction(STORE, 'readonly');
+  const st = tx.objectStore(STORE);
+  const [idx, prev] = await Promise.all([reqP(st.get(INDEX_KEY)), reqP(st.get(OLD_PREV_KEY))]);
+  db.close();
+  const list = ((idx as HistoryEntry[]) || []).slice();
+  const p = prev as StoredProject | undefined;
+  if (p) list.unshift({ id: OLD_PREV_KEY, name: p.name || '수업', savedAt: p.savedAt, keptAt: p.savedAt, slides: p.scenes?.length || 0, reason: 'replaced', lessonId: lessonOf(p) });
+  return list;
+}
+
+export async function loadHistory(id: string): Promise<StoredProject | null> {
+  const db = await openDB();
+  const p = await reqP(db.transaction(STORE, 'readonly').objectStore(STORE).get(id));
+  db.close();
+  return (p as StoredProject) || null;
+}
+
+/**
+ * 기록의 수업을 되살린다: 지금 수업은 먼저 기록에 보관하고, 고른 수업을 지금 수업으로.
+ * (되살린 기록은 그대로 남겨 둔다 → 몇 번을 오가도 사라지는 것이 없다)
+ */
+export async function restoreHistory(id: string, current: StoredProject | null): Promise<StoredProject | null> {
+  const target = await loadHistory(id);
+  if (!target) return null;
+  const db = await openDB();
+  try {
+    await runTx(db, async store => {
+      let index = ((await reqP(store.get(INDEX_KEY))) as HistoryEntry[] | undefined) || [];
+      if (current && hasContent(current)) index = pushHistory(store, index, current, 'before-restore');
+      store.put(index, INDEX_KEY);
+      store.put({ ...target, lessonId: lessonOf(target) }, KEY);
+    });
+  } finally { db.close(); }
+  return { ...target, lessonId: lessonOf(target) };
 }
 
 export function isValidProject(p: any): p is StoredProject {

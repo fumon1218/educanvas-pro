@@ -1,3 +1,4 @@
+import { storeName } from './testMode';
 /**
  * 3D 자산함: GLB 파일을 이 브라우저(IndexedDB)에 보관한다.
  * 수업 파일(.json)에는 모델 자체가 아니라 모델 번호와 미리보기만 들어간다.
@@ -25,7 +26,7 @@ interface ModelRecord extends ModelAsset {
   blob: Blob;
 }
 
-const DB_NAME = 'okssam-assets';
+const DB_NAME = storeName('okssam-assets');
 const STORE = 'models';
 
 function openDB(): Promise<IDBDatabase> {
