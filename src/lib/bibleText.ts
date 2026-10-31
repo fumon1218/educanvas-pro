@@ -93,7 +93,8 @@ function splitOkurigana(base: string, rt: string): RubyPart[] {
 export function cleanVerse(html: string, v: BibleVersion): RubyPart[] {
   let s = html
     .replace(/<sup[\s\S]*?<\/sup>/gi, '')          // 각주
-    .replace(/<div[\s\S]*?<\/div>/gi, '')          // 소제목
+    .replace(/<div[^>]*font-weight\s*:\s*bold[^>]*>[\s\S]*?<\/div>/gi, '') // 소제목 (시 줄은 남김)
+    .replace(/<\/?div[^>]*>/gi, ' ')
     .replace(/<p>\s*<u>\d+<\/u>[\s\S]*$/i, '')     // 다음 절이 붙어 들어간 경우
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<TS>([\s\S]*?)<Ts>/g, '$1 ');
@@ -165,9 +166,10 @@ export const refLabel = (bookName: string, r: VerseRange) =>
 // ---------------------------------------------------------------------------
 
 const PREF = 'okssam_bible_pref';
-export interface BiblePref { versions: string[]; ruby: 'over' | 'paren'; numbers: boolean }
+export type CardBg = 'yellow' | 'white' | 'none';
+export interface BiblePref { versions: string[]; ruby: 'over' | 'paren'; numbers: boolean; bg: CardBg }
 export const getBiblePref = (): BiblePref => {
-  try { return { versions: ['KRV'], ruby: 'over', numbers: true, ...JSON.parse(localStorage.getItem(PREF) || '{}') }; }
-  catch { return { versions: ['KRV'], ruby: 'over', numbers: true }; }
+  try { return { versions: ['KRV'], ruby: 'over', numbers: true, bg: 'yellow', ...JSON.parse(localStorage.getItem(PREF) || '{}') }; }
+  catch { return { versions: ['KRV'], ruby: 'over', numbers: true, bg: 'yellow' }; }
 };
 export const setBiblePref = (p: BiblePref) => { try { localStorage.setItem(PREF, JSON.stringify(p)); } catch { /* 무시 */ } };

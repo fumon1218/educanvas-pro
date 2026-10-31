@@ -3,13 +3,14 @@
  *  - 'over': 한자 위에 읽는 법을 작게 (그림 카드). 두 번 누르면 괄호 글로 바뀌어 고칠 수 있다.
  *  - 그 밖에는 고칠 수 있는 글 상자.
  */
-import { partsToText, type Passage, type RubyPart } from './bibleText';
+import { partsToText, type CardBg, type Passage, type RubyPart } from './bibleText';
 
 const FONT = "'Pretendard', 'Noto Sans KR', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif";
-export const CARD_BG = '#fef3c7';
+/** 카드 바탕: 노랑 · 흰색 · 투명 */
+export const CARD_BGS: Record<CardBg, string> = { yellow: '#fef3c7', white: '#ffffff', none: '' };
 export const CARD_HEAD = '#92400e';
 
-export interface CardOpts { ruby: 'over' | 'paren'; numbers: boolean }
+export interface CardOpts { ruby: 'over' | 'paren'; numbers: boolean; bg?: CardBg }
 
 /** 고칠 수 있는 글 (괄호 방식). 첫 줄이 머리 */
 export function passagesToText(ref: string, ps: Passage[], o: CardOpts): string {
@@ -27,7 +28,7 @@ interface Tok { t: string; rt?: string; w: number; space?: boolean; num?: boolea
 /** 읽는 법을 위에 작게 단 카드 그림. 화면보다 3배 크게 그려 확대해도 또렷하다 */
 export async function renderRubyCard(ref: string, ps: Passage[], o: CardOpts, width = 640): Promise<{ url: string; w: number; h: number }> {
   try { await (document as any).fonts?.ready; } catch { /* 무시 */ }
-  const S = 3, PAD = 22, FS = 22, RT = 11, HEAD = 24, LABEL = 15;
+  const S = 3, PAD = 22, FS = 22, RT = 11, HEAD = 15, LABEL = 12;
   const inner = width - PAD * 2;
   const meas = document.createElement('canvas').getContext('2d')!;
   const font = (px: number, bold = false) => `${bold ? 'bold ' : ''}${px}px ${FONT}`;
@@ -85,8 +86,8 @@ export async function renderRubyCard(ref: string, ps: Passage[], o: CardOpts, wi
   c.width = Math.ceil(width * S); c.height = Math.ceil(h * S);
   const g = c.getContext('2d')!;
   g.scale(S, S);
-  g.fillStyle = CARD_BG;
-  g.beginPath(); (g as any).roundRect ? (g as any).roundRect(0, 0, width, h, 14) : g.rect(0, 0, width, h); g.fill();
+  const bg = CARD_BGS[o.bg || 'yellow'];
+  if (bg) { g.fillStyle = bg; g.beginPath(); (g as any).roundRect ? (g as any).roundRect(0, 0, width, h, 14) : g.rect(0, 0, width, h); g.fill(); }
   g.textBaseline = 'alphabetic';
   let y = PAD + HEAD;
   g.fillStyle = CARD_HEAD; g.font = font(HEAD, true);
