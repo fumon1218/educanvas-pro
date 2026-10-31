@@ -54,6 +54,18 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 | docx | 노트를 워드(docx)로 내보내기 | MIT |
 | @hyunbinseo/holidays-kr | 달력의 공휴일·대체공휴일 (우주항공청 월력요항) | MIT |
 
+## 한글 문서
+
+본 제품은 한글과컴퓨터의 한/글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.
+
+## 악기 소리
+
+악보 연주에 쓰는 악기 소리는 FluidR3_GM 사운드폰트(Frank Wen, CC BY 3.0)를 MIDI.js Soundfonts(Benjamin Gleitzman, MIT)로 변환한 것을 씁니다.
+
+## 라이선스 전문
+
+앱에 들어가는 모든 오픈소스 패키지의 라이선스 전문은 앱의 [설정 → 저작권·오픈소스 고지 → 전문 보기](licenses.txt)에서 볼 수 있습니다(빌드할 때 자동으로 모음).
+
 ## 악보 기능
 
 `src/music/` 폴더의 악보 해석·연주 코드는 제작자가 직접 만든 사보앱(sheet-music-app)에서 옮겨 온 것입니다.

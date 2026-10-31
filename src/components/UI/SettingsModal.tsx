@@ -1,3 +1,4 @@
+import NOTICES from '@/THIRD_PARTY_NOTICES.md?raw';
 import React, { useState } from 'react';
 import { getPenSettings, setPenSettings, type PenSettings } from '@/src/lib/pen';
 import { motion, AnimatePresence } from 'motion/react';
@@ -91,6 +92,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </label>
 
             <PenSection />
+
+            <details className="group rounded-xl border border-gray-100 px-3 py-2">
+              <summary className="cursor-pointer text-sm font-semibold text-gray-700">저작권·오픈소스 고지</summary>
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-gray-600">{NOTICES}</pre>
+              <a href={`${import.meta.env.BASE_URL}licenses.txt`} target="_blank" rel="noreferrer" className="inline-block mt-2 text-xs font-semibold text-indigo-600 hover:underline">라이선스 전문 보기</a>
+            </details>
 
             <div className="flex items-center justify-between">
               <div className="space-y-1">

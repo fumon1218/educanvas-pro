@@ -6,8 +6,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
+  // 출시판(VITE_EDITION=lite)은 /educanvas-pro/lite/ 에 따로 올린다 (전체판 dist 안의 lite 폴더)
+  const lite = (env.VITE_EDITION || process.env.VITE_EDITION) === 'lite';
   return {
-    base: mode === 'production' ? '/educanvas-pro/' : '/',
+    base: mode === 'production' ? (lite ? '/educanvas-pro/lite/' : '/educanvas-pro/') : '/',
     plugins: [
       react(),
       tailwindcss(),
@@ -38,7 +40,8 @@ export default defineConfig(({ mode }) => {
           globIgnores: ['**/rhwp_bg-*.wasm'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/__/],
+          // 전체판의 서비스 워커가 출시판 주소(/lite/)를 가로채지 않게
+          navigateFallbackDenylist: lite ? [/^\/__/] : [/^\/__/, /\/lite\//],
           cleanupOutdatedCaches: true,
           runtimeCaching: [
             { urlPattern: /\/assets\/rhwp_bg-[\w-]+\.wasm$/, handler: 'CacheFirst', options: { cacheName: 'hwp-engine', expiration: { maxEntries: 2 }, cacheableResponse: { statuses: [0, 200] } } },
@@ -61,6 +64,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      outDir: lite ? 'dist/lite' : 'dist',
       rollupOptions: {
         output: {
           manualChunks: {

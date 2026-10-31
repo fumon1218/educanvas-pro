@@ -11,6 +11,7 @@
 import * as fabric from 'fabric';
 import { serializeCanvas } from './canvasData';
 import type { Space } from './projectStore';
+import { LITE } from './edition';
 
 export type PaperStyle = 'lined' | 'grid' | 'blank' | 'cornell' | 'sermon' | 'meeting' | 'worklog' | 'planner';
 export interface TemplateDef { id: string; space: Space; label: string; desc: string; paper?: PaperStyle; name: (d: Date) => string }
@@ -29,7 +30,7 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'worklog', space: 'work', label: '업무 일지', desc: '오늘 할 일, 한 일, 내일 할 일, 메모', paper: 'worklog', name: d => `업무 일지 · ${md(d)}` },
   { id: 'lined', space: 'work', label: '줄 공책', desc: '자유 메모', paper: 'lined', name: d => `업무 메모 · ${md(d)}` },
 ];
-export const templatesFor = (space: Space) => TEMPLATES.filter(t => t.space === space);
+export const templatesFor = (space: Space) => TEMPLATES.filter(t => t.space === space && !(LITE && t.space === 'sermon'));
 
 // ---------------------------------------------------------------------------
 // 종이 그리기 (A4 세로, 1240 × 1754 px)

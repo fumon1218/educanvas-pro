@@ -1,3 +1,4 @@
+import { LITE } from './edition';
 import { storeName } from './testMode';
 /**
  * 브라우저 IndexedDB 저장소. localStorage(약 5MB)와 달리 PDF 이미지가 많은
@@ -79,13 +80,15 @@ async function withDB<T>(fn: (db: IDBDatabase) => Promise<T>): Promise<T> {
 // ===========================================================================
 
 export type Space = 'lesson' | 'student' | 'sermon' | 'work';
-export const SPACES: { id: Space; label: string; noun: string }[] = [
+export const ALL_SPACES: { id: Space; label: string; noun: string }[] = [
   { id: 'lesson', label: '수업', noun: '수업' },
   { id: 'student', label: '학생', noun: '공부 노트' },
   { id: 'sermon', label: '설교', noun: '설교 노트' },
   { id: 'work', label: '업무', noun: '업무 노트' },
 ];
-export const spaceOf = (x: { space?: Space }) => x.space || 'lesson';
+/** 화면에 보이는 공간 (출시판에는 설교 공간이 없다) */
+export const SPACES = LITE ? ALL_SPACES.filter(s => s.id !== 'sermon') : ALL_SPACES;
+export const spaceOf = (x: { space?: Space }) => { const s = x.space || 'lesson'; return SPACES.some(v => v.id === s) ? s : 'lesson'; };
 
 export interface LibraryEntry {
   id: string;
