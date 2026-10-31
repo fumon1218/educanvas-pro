@@ -53,6 +53,15 @@ npm run build        # dist/ 폴더에 배포용 파일 생성
 npm run lint         # 타입 검사
 ```
 
+## 판 (전체판 · 출시판)
+
+| | 주소 | 빌드 |
+|---|---|---|
+| 전체판 | /educanvas-pro/ | `npm run build` |
+| 출시판 | /educanvas-pro/lite/ | `npm run build:lite` (`VITE_EDITION=lite`) |
+
+출시판에서 빼는 것: 설교 공간(성경 본문은 번역본마다 저작권이 있음), Explain Everything 파일 불러오기(다른 회사 제품 형식), 노트워디(.nwc) 악보 불러오기. 출시판은 저장소 이름에 `-lite`를 붙여 전체판과 따로 저장한다. 판 구분은 `src/lib/edition.ts`.
+
 ## 배포
 
 `main` 브랜치에 올리면 GitHub Actions가 자동으로 GitHub Pages에 배포합니다(`.github/workflows/deploy.yml`).

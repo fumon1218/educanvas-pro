@@ -31,6 +31,8 @@ jobs:
         run: npm install
       - name: Build
         run: npm run build
+      - name: Build (출시판 /lite/)
+        run: npm run build:lite
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

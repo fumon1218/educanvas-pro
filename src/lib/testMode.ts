@@ -17,5 +17,6 @@ const detect = () => {
 
 export const TEST_MODE = typeof window !== 'undefined' && detect();
 
-/** 저장소 이름: 시험 모드면 따로 */
-export const storeName = (name: string) => (TEST_MODE ? `${name}-test` : name);
+/** 저장소 이름: 출시판·시험 모드면 따로 */
+const LITE = import.meta.env.VITE_EDITION === 'lite';
+export const storeName = (name: string) => `${name}${LITE ? '-lite' : ''}${TEST_MODE ? '-test' : ''}`;

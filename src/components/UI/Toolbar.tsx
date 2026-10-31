@@ -1,4 +1,5 @@
 import { DOC_ACCEPT } from '@/src/lib/docImport';
+import { LITE } from '@/src/lib/edition';
 import { askText } from './PromptHost';
 import React, { useState } from 'react';
 import {
@@ -142,8 +143,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       title: '노트',
       items: [
         { id: 'n-todo', icon: ListChecks, label: '할 일 목록', hint: '☐를 누르면 체크 · @담당 ~기한', action: () => onNoteTool?.('todo') },
-        { id: 'n-prayer', icon: HeartHandshake, label: '기도 제목', hint: '설교 공간에서 모아 보기', action: () => onNoteTool?.('prayer') },
-        { id: 'n-bible', icon: BookOpen, label: '성경 구절 카드', hint: '예: 롬 8:28', action: () => onNoteTool?.('bible') },
+        ...(LITE ? [] : [
+          { id: 'n-prayer', icon: HeartHandshake, label: '기도 제목', hint: '설교 공간에서 모아 보기', action: () => onNoteTool?.('prayer') },
+          { id: 'n-bible', icon: BookOpen, label: '성경 구절 카드', hint: '예: 롬 8:28', action: () => onNoteTool?.('bible') },
+        ]),
         { id: 'n-cal', icon: CalendarDays, label: '달력', hint: '월간 달력·주간 계획표 (공휴일 표시)', action: () => onNoteTool?.('calendar') },
         { id: 'n-page', icon: FilePlus2, label: '공책 쪽 추가', hint: '줄 공책·양식 노트 아래에 한 쪽 더', action: () => onNoteTool?.('page') },
       ],
@@ -204,7 +207,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept={`image/*,video/*,audio/*,${DOC_ACCEPT},.glb,.nwc,.nwctxt,.mid,.midi,.musicxml,.xml,.mxl,.explain`}
+        accept={`image/*,video/*,audio/*,${DOC_ACCEPT},${LITE ? '.glb,.mid,.midi,.musicxml,.xml,.mxl' : '.glb,.nwc,.nwctxt,.mid,.midi,.musicxml,.xml,.mxl,.explain'}`}
         onChange={e => {
           const file = e.target.files?.[0];
           if (file) onAddFile(file);

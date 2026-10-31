@@ -58,6 +58,7 @@ import { isStaleChunkError, recoverFromStaleChunk } from './lib/appUpdate';
 import { TEST_MODE } from './lib/testMode';
 import { DocImportError, isDocumentFile, type PageSource } from './lib/docImport';
 import { importExplain, isExplainFile } from './lib/explainImport';
+import { LITE } from './lib/edition';
 import { saveDoc } from './lib/hdRender';
 import { cn } from './lib/utils';
 import { db, auth, signInWithGoogle } from './firebase';
@@ -1473,8 +1474,8 @@ export default function App() {
 
   const routeFile = useCallback(async (file: File) => {
     const name = file.name.toLowerCase();
-    const isScoreFileName = (n: string) => /\.(nwc|nwctxt|mid|midi|musicxml|mxl|xml)$/i.test(n);
-    if (isExplainFile(file)) {
+    const isScoreFileName = (n: string) => (LITE ? /\.(mid|midi|musicxml|mxl|xml)$/i : /\.(nwc|nwctxt|mid|midi|musicxml|mxl|xml)$/i).test(n);
+    if (!LITE && isExplainFile(file)) {
       openExplain(file);
     } else if (isDocumentFile(file)) {
       openPdf(file);
@@ -2156,7 +2157,7 @@ export default function App() {
       />
 
       <PromptHost />
-      <BibleHost />
+      {!LITE && <BibleHost />}
       <CalendarHost />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard

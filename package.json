@@ -1,11 +1,12 @@
 {
   "name": "okssam-board",
   "private": true,
-  "version": "0.15.0",
+  "version": "0.16.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
+    "build": "node scripts/gen-licenses.mjs && vite build",
+    "build:lite": "VITE_EDITION=lite vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
