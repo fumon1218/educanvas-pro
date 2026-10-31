@@ -17,6 +17,7 @@ import { BottomNavBar } from './components/UI/BottomNavBar';
 import { SettingsModal } from './components/UI/SettingsModal';
 import { SlideNavigator } from './components/UI/SlideNavigator';
 import { FloatingCamera } from './components/UI/FloatingCamera';
+import { LessonHistoryModal } from './components/UI/LessonHistoryModal';
 import { PdfImportModal, type PdfImportMode } from './components/UI/PdfImportModal';
 import { CollaborationModal } from './components/UI/CollaborationModal';
 import { ConfirmDialog, ConfirmState } from './components/UI/ConfirmDialog';
@@ -47,13 +48,14 @@ import { useMultiplayer, SyncData, CursorData } from './hooks/useMultiplayer';
 import { AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { isStaleChunkError, recoverFromStaleChunk } from './lib/appUpdate';
+import { TEST_MODE } from './lib/testMode';
 import { DocImportError, isDocumentFile, type PageSource } from './lib/docImport';
 import { cn } from './lib/utils';
 import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { newId, normalizeSceneData, renderSceneImage, createImageScene, createScoreScene, createStackedPdfScene } from './lib/canvasData';
-import { saveProject, loadProject, legacyLessonId, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
+import { saveProject, loadProject, restoreHistory, legacyLessonId, type HistoryEntry, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
 import { formatBytes } from './lib/assetStore';
 
 interface Scene {
@@ -597,7 +599,7 @@ export default function App() {
   // =====================================================================
   // 구글 드라이브 동기화
   // =====================================================================
-  const [driveOn, setDriveOn] = useState(() => { try { return localStorage.getItem('okssam_drive_sync') === '1'; } catch { return false; } });
+  const [driveOn, setDriveOn] = useState(() => { if (TEST_MODE) return false; try { return localStorage.getItem('okssam_drive_sync') === '1'; } catch { return false; } });
   const driveOnRef = useRef(driveOn);
   driveOnRef.current = driveOn;
   const [driveState, setDriveState] = useState<'off' | 'synced' | 'saving' | 'pending' | 'need-auth' | 'error' | 'conflict'>(driveOn ? 'pending' : 'off');
@@ -687,6 +689,7 @@ export default function App() {
   }, [driveTokenOrNull, applyProject, buildProject]);
 
   const enableDrive = useCallback(async () => {
+    if (TEST_MODE) { toast.error('시험 모드에서는 구글 드라이브를 쓰지 않습니다.', { description: '실제 수업을 보호하기 위해서입니다. 주소에서 ?test=1을 빼고 새 탭으로 여세요.' }); return false; }
     const { connectDrive } = await import('./lib/driveSync');
     try {
       await connectDrive();
@@ -760,26 +763,26 @@ export default function App() {
     }
   }, [applyProject]);
 
-  /** 다른 수업을 저장하면서 한 칸 보관해 둔 직전 수업 되살리기 */
-  const handleLoadPrevious = useCallback(async () => {
-    try {
-      const p = await loadProject('previous');
-      if (!p) { toast.info('보관된 직전 수업이 없습니다.', { description: '다른 수업을 저장할 때 원래 수업이 여기에 한 칸 보관됩니다.' }); return; }
-      setConfirmState({
-        title: '직전 수업을 되살릴까요?',
-        message: `'${p.name}' (${new Date(p.savedAt).toLocaleString('ko-KR')} 저장, 슬라이드 ${p.scenes.length}장)\n지금 수업은 저장되어 이 자리(직전 수업)로 옮겨집니다.`,
-        confirmLabel: '되살리기',
-        onConfirm: async () => {
-          await saveRef.current(false);
-          p.lessonId = p.lessonId || legacyLessonId(p);
-          await saveProject(p); // 지금 수업은 '직전 수업' 자리로 옮겨진다
+  /** 수업 기록에서 되살리기: 지금 수업은 먼저 기록에 보관된다 */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const buildRef = useRef(buildProject);
+  buildRef.current = buildProject;
+  const handleRestoreHistory = useCallback((h: HistoryEntry) => {
+    setConfirmState({
+      title: '이 수업을 되살릴까요?',
+      message: `'${h.name}' (${new Date(h.savedAt).toLocaleString('ko-KR')} 저장, 슬라이드 ${h.slides}장)\n지금 수업은 수업 기록에 먼저 보관되므로 사라지지 않습니다.`,
+      confirmLabel: '되살리기',
+      onConfirm: async () => {
+        try {
+          const p = await restoreHistory(h.id, buildRef.current());
+          if (!p) { toast.error('기록을 찾지 못했습니다.'); return; }
           applyProject(p, { publish: true });
-          toast.success('직전 수업을 되살렸습니다.');
-        },
-      });
-    } catch {
-      toast.error('불러오지 못했습니다.');
-    }
+          dirtyRef.current = false;
+          setHistoryOpen(false);
+          toast.success('수업을 되살렸습니다.');
+        } catch { toast.error('되살리지 못했습니다.'); }
+      },
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyProject]);
 
@@ -1524,7 +1527,7 @@ export default function App() {
         onRenameProject={name => { setProjectName(name); markDirty(); }}
         onSave={() => { void saveToBrowser(!driveOnRef.current); if (driveOnRef.current) void saveToDrive({ manual: true }); }}
         onLoad={handleLoadFromBrowser}
-        onLoadPrevious={handleLoadPrevious}
+        onOpenHistory={() => setHistoryOpen(true)}
         onExportFile={handleExportFile}
         onImportFile={() => projectFileInputRef.current?.click()}
         onExportPDF={() => handleExportPDF('all')}
@@ -1803,6 +1806,7 @@ export default function App() {
         onToggleOrientation={() => setIsVertical(v => !v)}
       />
 
+      <LessonHistoryModal isOpen={historyOpen} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <DriveLessonsModal
         isOpen={lessonsOpen}
         onClose={() => setLessonsOpen(false)}
