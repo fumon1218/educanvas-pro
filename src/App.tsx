@@ -46,6 +46,7 @@ interface AppWindow {
 import { useMultiplayer, SyncData, CursorData } from './hooks/useMultiplayer';
 import { AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
+import { isStaleChunkError, recoverFromStaleChunk } from './lib/appUpdate';
 import { cn } from './lib/utils';
 import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
@@ -825,6 +826,11 @@ export default function App() {
   // 자동 저장 (변경이 있을 때만, 알림 없이)
   const saveRef = useRef(saveToBrowser);
   saveRef.current = saveToBrowser;
+  // 새 버전으로 바꾸기 직전에 저장 (lib/appUpdate)
+  useEffect(() => {
+    (window as any).__okssamFlush = async () => { if (dirtyRef.current) await saveRef.current(false); };
+    return () => { delete (window as any).__okssamFlush; };
+  }, []);
   useEffect(() => {
     const t = setInterval(() => { if (dirtyRef.current && !isDrawingRef.current) saveRef.current(false); }, AUTOSAVE_MS);
     const onHide = () => { if (document.visibilityState === 'hidden' && dirtyRef.current) saveRef.current(false); };
@@ -926,6 +932,7 @@ export default function App() {
       setPendingPdf({ name: file.name, numPages: doc.numPages, preview });
     } catch (err) {
       console.error(err);
+      if (isStaleChunkError(err)) { toast.dismiss(toastId); void recoverFromStaleChunk(); return; }
       toast.error('PDF를 열지 못했습니다.', { id: toastId, description: '암호가 걸려 있거나 손상된 파일일 수 있습니다.' });
     }
   }, []);
@@ -1146,7 +1153,7 @@ export default function App() {
 
   const routeFile = useCallback(async (file: File) => {
     const name = file.name.toLowerCase();
-    const { isScoreFileName } = await import('./music/loadScore');
+    const isScoreFileName = (n: string) => /\.(nwc|nwctxt|mid|midi|musicxml|mxl|xml)$/i.test(n);
     if (file.type === 'application/pdf' || name.endsWith('.pdf')) {
       openPdf(file);
     } else if (name.endsWith('.glb')) {
