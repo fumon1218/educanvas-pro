@@ -204,7 +204,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept={`image/*,video/*,audio/*,${DOC_ACCEPT},.glb,.nwc,.nwctxt,.mid,.midi,.musicxml,.xml,.mxl`}
+        accept={`image/*,video/*,audio/*,${DOC_ACCEPT},.glb,.nwc,.nwctxt,.mid,.midi,.musicxml,.xml,.mxl,.explain`}
         onChange={e => {
           const file = e.target.files?.[0];
           if (file) onAddFile(file);
