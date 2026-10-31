@@ -138,7 +138,7 @@ const PenSection: React.FC = () => {
   return (
     <div className="space-y-3">
       <div className="text-sm font-semibold text-gray-700">애플 펜슬 · 스타일러스</div>
-      <Toggle k="pressure" title="필압 쓰기" desc="세게 누르면 굵게, 살짝 대면 가늘게 (펜·연필·만년필·볼펜)" />
+      <Toggle k="pressure" title="필압 쓰기" desc="켜면 세게 누를수록 굵게, 끄면 누르는 힘과 상관없이 늘 같은 굵기로 씁니다. 이미 쓴 글씨는 그대로입니다." />
       <Toggle k="fingerPans" title="펜을 쓰면 손가락은 화면 이동만" desc="손바닥·손가락이 닿아도 그어지지 않습니다. 두 손가락으로 확대합니다." />
     </div>
   );

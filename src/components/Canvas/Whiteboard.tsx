@@ -249,6 +249,15 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   const propsRef = useRef(props);
   propsRef.current = props;
   const toolRef = useRef(tool);
+  // 설정에서 필압을 켜고 끄면 바로 적용 (도구를 다시 고르지 않아도)
+  useEffect(() => {
+    const on = () => {
+      const b: any = fabricRef.current?.freeDrawingBrush;
+      if (b instanceof PressureBrush) b.pressureEnabled = getPenSettings().pressure && PRESSURE_TOOLS.includes(toolRef.current);
+    };
+    window.addEventListener('okssam:pen-settings', on);
+    return () => window.removeEventListener('okssam:pen-settings', on);
+  }, []);
   toolRef.current = tool;
   const colorRef = useRef(color);
   colorRef.current = color;
