@@ -19,7 +19,8 @@ import { FloatingCamera } from './components/UI/FloatingCamera';
 import { LessonHistoryModal } from './components/UI/LessonHistoryModal';
 import { LessonDashboard } from './components/UI/LessonDashboard';
 import { PromptHost, askText } from './components/UI/PromptHost';
-import { buildTemplateScene, parseBibleRef, bibleUrl, type TemplateDef } from './lib/templates';
+import { BibleHost, pickBible } from './components/UI/BiblePicker';
+import { buildTemplateScene, type TemplateDef } from './lib/templates';
 import { checkItemsOf, setCheckInData, type CheckItem } from './lib/noteOps';
 import { ClipSaveModal, StudyLogModal, FocusChip, FlashReviewBar, type FocusState } from './components/Study/StudyTools';
 import { WRONG_NOTE_ID, createClipScene, addToWrongNote, addStudyMinute, addFocusSession, nextDue, initialStudentMode, saveStudentMode } from './lib/study';
@@ -1097,12 +1098,12 @@ export default function App() {
       return;
     }
     if (kind === 'bible') {
-      const v = await askText({ title: '성경 구절 카드', placeholder: '예: 롬 8:28-30, 시편 23편', confirmLabel: '넣기', hint: '본문은 카드에 직접 적거나 붙여넣습니다. [본문 보기]로 대한성서공회 성경을 엽니다.' });
-      if (!v) return;
-      const r = parseBibleRef(v.replace(/편/, ''));
-      if (!r) { toast.error('구절을 알아보지 못했습니다.', { description: '예: 롬 8:28, 요한복음 3장 16절, 시 23' }); return; }
-      whiteboardRef.current?.addBibleCard(r.ref);
-      toast.success(`'${r.ref}' 카드를 넣었습니다.`, { action: { label: '본문 보기', onClick: () => openWebWindow(bibleUrl(r.code, r.chap)) }, duration: 8000 });
+      // 설교 노트의 '본문' 칸에 적은 구절이 있으면 그것으로 시작
+      const field = whiteboardRef.current?.getFieldText('passage') || '';
+      const card = await pickBible(field || undefined);
+      if (!card) return;
+      await whiteboardRef.current?.addBibleCard(card);
+      toast.success(`'${card.ref}' 카드를 넣었습니다.`, card.image ? { description: '카드를 두 번 누르면 괄호 글로 바뀌어 글자를 고칠 수 있습니다.', duration: 7000 } : undefined);
       return;
     }
     whiteboardRef.current?.addChecklist(kind);
@@ -2123,6 +2124,7 @@ export default function App() {
       />
 
       <PromptHost />
+      <BibleHost />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard
         isOpen={lessonsOpen}
