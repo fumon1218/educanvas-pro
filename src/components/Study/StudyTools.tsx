@@ -70,7 +70,7 @@ export const ClipSaveModal: React.FC<{
       <button onClick={save} disabled={busy} className="mt-5 w-full h-12 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
         {busy ? <Loader2 size={18} className="animate-spin" /> : <BookmarkPlus size={18} />}오답 노트에 넣기
       </button>
-      <p className="mt-2 text-[12px] text-slate-500 text-center">[내 수업]의 '오답 노트' 수업에 한 장씩 쌓입니다. 시험 전에 그 수업만 넘겨 보세요.</p>
+      <p className="mt-2 text-[12px] text-slate-500 text-center">[내 노트 → 학생]의 '오답 노트'에 한 장씩 쌓입니다. 시험 전에 그 노트만 넘겨 보세요.</p>
     </Shell>
   );
 };

@@ -59,7 +59,7 @@ export async function addToWrongNote(sceneData: string, title: string): Promise<
   const scene = { id: newId(), name: title.slice(0, 100) || '오답', data: sceneData };
   const p: StoredProject = existing
     ? { ...existing, scenes: [...existing.scenes, scene], savedAt: now }
-    : { format: 'educanvas-project', version: 1, name: WRONG_NOTE_NAME, savedAt: now, activeSceneId: scene.id, canvasBackground: 'blank', scenes: [scene], lessonId: WRONG_NOTE_ID, category: WRONG_NOTE_NAME };
+    : { format: 'educanvas-project', version: 1, name: WRONG_NOTE_NAME, savedAt: now, activeSceneId: scene.id, canvasBackground: 'blank', scenes: [scene], lessonId: WRONG_NOTE_ID, category: WRONG_NOTE_NAME, space: 'student' };
   await saveProject(p, { touchLast: false });
   return p.scenes.length;
 }

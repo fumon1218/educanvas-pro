@@ -37,7 +37,7 @@ export const LayerPanel: React.FC<LayerPanelProps> = React.memo(({
   );
 
   return (
-    <div className="absolute z-30 pointer-events-none right-8 bottom-[116px]">
+    <div className="absolute z-30 pointer-events-none right-3 bottom-[124px] sm:right-8 sm:bottom-[116px]">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(

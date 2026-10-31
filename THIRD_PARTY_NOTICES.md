@@ -50,6 +50,8 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 | html-to-image | 문서 화면을 그림으로 | MIT |
 | JSZip | 키노트·페이지스 파일 열기 | MIT (MIT 또는 GPL-3.0 중 MIT 선택) |
 | perfect-freehand | 애플 펜슬 필압 선 | MIT |
+| hwp-convert | 노트를 한글(hwpx)로 내보내기 | MIT |
+| docx | 노트를 워드(docx)로 내보내기 | MIT |
 
 ## 악보 기능
 

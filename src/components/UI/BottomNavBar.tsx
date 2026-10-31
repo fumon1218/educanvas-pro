@@ -25,6 +25,8 @@ interface BottomNavBarProps {
   isVertical?: boolean;
   onRecord?: () => void;
   isRecording?: boolean;
+  /** 휴대폰: 작게 (확대 비율은 두 손가락으로) */
+  isPhone?: boolean;
 }
 
 export const glass = 'bg-white/80 backdrop-blur-xl ring-1 ring-slate-900/[0.06] shadow-[0_8px_30px_-6px_rgba(15,23,42,0.18)]';
@@ -33,7 +35,7 @@ export const glass = 'bg-white/80 backdrop-blur-xl ring-1 ring-slate-900/[0.06] 
 export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   zoomLevel, onResetZoom, onZoomIn, onZoomOut, slides, activeSlideId, onSelectSlide,
   onNextSlide, onPrevSlide, onAddSlide, onOpenSlideNavigator, isCameraOpen = false, onToggleCamera,
-  isVertical = true, onRecord, isRecording = false,
+  isVertical = true, onRecord, isRecording = false, isPhone = false,
 }) => {
   const idx = Math.max(0, slides.findIndex(s => s.id === activeSlideId));
   const total = slides.length;
@@ -44,7 +46,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   const zoomPercent = Math.round(zoomLevel * 100);
 
   return (
-    <div className={cn('absolute bottom-0 left-0 w-full flex justify-between items-end gap-3 pb-4 pointer-events-none z-40', isVertical ? 'pl-[92px] pr-4' : 'px-4')}>
+    <div className={cn('absolute bottom-0 left-0 w-full flex justify-between items-end pointer-events-none z-40', isPhone ? 'gap-1.5 pb-2 px-2' : 'gap-3 pb-4', !isPhone && (isVertical ? 'pl-[92px] pr-4' : 'px-4'))}>
       {/* 녹화 · 카메라 */}
       <div className={cn('pointer-events-auto flex items-center gap-1 p-1.5 rounded-2xl', glass)}>
         {onRecord && (
@@ -56,7 +58,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
             aria-label={isRecording ? '녹화 중' : '수업 녹화'}
           >
             <span className={cn('w-3 h-3 rounded-full bg-red-500', isRecording && 'animate-pulse')} />
-            <span className="text-[13px] font-semibold">{isRecording ? '녹화 중' : '녹화'}</span>
+            {!isPhone && <span className="text-[13px] font-semibold">{isRecording ? '녹화 중' : '녹화'}</span>}
           </button>
         )}
         <button
@@ -72,7 +74,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
 
       {/* 슬라이드 띠 */}
       <div className={cn('pointer-events-auto flex items-center gap-1 p-1.5 rounded-2xl min-w-0', glass)}>
-        <button onClick={onPrevSlide} disabled={idx <= 0} className="w-9 h-12 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5 disabled:opacity-30" title="이전 슬라이드 (PageUp)" aria-label="이전 슬라이드">
+        <button onClick={onPrevSlide} disabled={idx <= 0} className="w-9 h-10 sm:h-12 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5 disabled:opacity-30" title="이전 슬라이드 (PageUp)" aria-label="이전 슬라이드">
           <ChevronLeft size={19} />
         </button>
         <div className="hidden md:flex items-center gap-1.5 px-0.5">
@@ -97,21 +99,21 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
             );
           })}
         </div>
-        <button onClick={onAddSlide} className="w-9 h-12 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5" title="슬라이드 추가" aria-label="슬라이드 추가">
+        <button onClick={onAddSlide} className="w-9 h-10 sm:h-12 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5" title="슬라이드 추가" aria-label="슬라이드 추가">
           <Plus size={19} />
         </button>
         <div className="w-px h-7 bg-slate-200 mx-0.5" />
-        <button onClick={onOpenSlideNavigator} className="flex items-center gap-1.5 h-12 px-2.5 rounded-xl text-slate-600 hover:bg-slate-900/5" title="슬라이드 전체 보기" aria-label="슬라이드 전체 보기">
+        <button onClick={onOpenSlideNavigator} className="flex items-center gap-1.5 h-10 sm:h-12 px-2.5 rounded-xl text-slate-600 hover:bg-slate-900/5" title="슬라이드 전체 보기" aria-label="슬라이드 전체 보기">
           <LayoutGrid size={16} />
           <span className="text-[13px] font-semibold tabular-nums">{idx + 1} / {total}</span>
         </button>
-        <button onClick={onNextSlide} disabled={idx >= total - 1} className="w-9 h-12 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5 disabled:opacity-30" title="다음 슬라이드 (PageDown)" aria-label="다음 슬라이드">
+        <button onClick={onNextSlide} disabled={idx >= total - 1} className="w-9 h-10 sm:h-12 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5 disabled:opacity-30" title="다음 슬라이드 (PageDown)" aria-label="다음 슬라이드">
           <ChevronRight size={19} />
         </button>
       </div>
 
       {/* 확대 비율 */}
-      <div className={cn('pointer-events-auto flex items-center p-1.5 rounded-2xl', glass)}>
+      <div className={cn('pointer-events-auto items-center p-1.5 rounded-2xl', glass, isPhone ? 'hidden' : 'flex')}>
         <button onClick={onZoomOut} className="w-9 h-10 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/5" title="축소" aria-label="축소"><Minus size={16} /></button>
         <button onClick={onResetZoom} className="h-10 px-2 min-w-[56px] rounded-xl text-[13px] font-semibold tabular-nums text-slate-700 hover:bg-slate-900/5" title="100%로 돌아가기" aria-label={`확대 비율 ${zoomPercent}%, 누르면 100%`}>
           {zoomPercent}%
