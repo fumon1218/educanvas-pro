@@ -1265,10 +1265,6 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         const lines = String(t.text).split('\n').map((l: string) => (l.trim() && !/^[☐☑]/.test(l) ? '☐ ' + l : l));
         const next = lines.join('\n');
         if (next !== t.text) { t.set({ text: next }); canvas.requestRenderAll(); commitChange(); }
-      } else if (t.field && !String(t.text).trim()) {
-        t.isPlaceholder = true;
-        t.set({ text: '(여기에 쓰기)', fill: '#94a3b8' });
-        canvas.requestRenderAll();
       }
     });
     canvas.on('object:added', e => {
@@ -1612,8 +1608,9 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     const fingerPan = { id: -1, x: 0, y: 0 };
     const hoverDot = document.createElement('div');
     hoverDot.setAttribute('aria-hidden', 'true');
-    hoverDot.style.cssText = 'position:absolute;left:0;top:0;border-radius:9999px;pointer-events:none;z-index:30;display:none;will-change:transform;box-shadow:0 0 0 1px rgba(255,255,255,.9);';
-    container.appendChild(hoverDot);
+    hoverDot.style.cssText = 'position:fixed;left:0;top:0;border-radius:9999px;pointer-events:none;z-index:45;display:none;will-change:transform;box-shadow:0 0 0 1px rgba(255,255,255,.9);';
+    // React가 그리는 판서 상자 안에 넣으면 화면이 바뀔 때 React와 부딪혀 앱이 멈춘다 → 페이지 맨 위층에 둔다
+    document.body.appendChild(hoverDot);
     const drawingNow = () => canvas.isDrawingMode || ['eraser', 'laser', 'rect', 'circle', 'triangle', 'line', 'arrow', 'text', 'bucket', 'magnify', 'clip', 'flashcard'].includes(toolRef.current as string);
     const fingerPansNow = () => penSeen && getPenSettings().fingerPans && drawingNow();
     const onPenFirstSeen = () => {
@@ -1635,12 +1632,11 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       if (hover.raf) return;
       hover.raf = requestAnimationFrame(() => {
         hover.raf = 0;
-        if (!hover.rect) hover.rect = container.getBoundingClientRect();
         const size = Math.max(4, (canvas.freeDrawingBrush?.width || 4) * canvas.getZoom());
         hoverDot.style.width = hoverDot.style.height = `${size}px`;
         hoverDot.style.background = (canvas.freeDrawingBrush?.color as string) || '#000';
         hoverDot.style.opacity = '0.55';
-        hoverDot.style.transform = `translate(${hover.x - hover.rect.left - size / 2}px, ${hover.y - hover.rect.top - size / 2}px)`;
+        hoverDot.style.transform = `translate(${hover.x - size / 2}px, ${hover.y - size / 2}px)`;
         hoverDot.style.display = 'block';
       });
     };

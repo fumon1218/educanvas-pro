@@ -207,12 +207,13 @@ async function addPaper(sc: fabric.StaticCanvas | fabric.Canvas, style: PaperSty
       sc.add(makeChecklist(f.checklist, left + f.x * k, top + f.y * k, f.w * k, fs));
       continue;
     }
+    // 칸은 비워 둔다 (날짜만 오늘로). 펜으로 쓰거나, 선택 도구로 칸을 두 번 눌러 타자로 적는다
     const isDate = f.key === 'date';
-    const t = new fabric.Textbox(isDate ? todayText(date) : f.ph, {
+    const t = new fabric.Textbox(isDate ? todayText(date) : '', {
       left: left + f.x * k, top: top + f.y * k, width: f.w * k, originX: 'left', originY: 'top', fontSize: fs,
-      fill: isDate ? '#0f172a' : '#94a3b8', fontFamily: KFONT,
+      fill: '#0f172a', fontFamily: KFONT,
     });
-    Object.assign(t as any, { id: newId(), field: f.key, fieldLabel: f.label, isPlaceholder: !isDate && !!f.ph });
+    Object.assign(t as any, { id: newId(), field: f.key, fieldLabel: f.label });
     sc.add(t);
   }
   return img.getScaledHeight();

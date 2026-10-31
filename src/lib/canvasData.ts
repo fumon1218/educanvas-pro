@@ -20,6 +20,15 @@ export function normalizeSceneData(raw: unknown): string | null {
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed === 'string') return normalizeSceneData(parsed);
+    // 예전 양식(v0.11.0)의 회색 예시 글자는 빈칸으로
+    if (raw.includes('"isPlaceholder":true')) {
+      const walk = (list: any[]) => list?.forEach(o => {
+        if (o?.objects) walk(o.objects);
+        if (o?.isPlaceholder) { o.text = ''; o.fill = '#0f172a'; delete o.isPlaceholder; o.styles = []; }
+      });
+      walk(parsed.objects || []);
+      return JSON.stringify(parsed);
+    }
     return raw;
   } catch {
     return null;
