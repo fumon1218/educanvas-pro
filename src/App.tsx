@@ -53,7 +53,7 @@ import { db, auth, signInWithGoogle } from './firebase';
 import { collection, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { newId, normalizeSceneData, renderSceneImage, createImageScene, createScoreScene, createStackedPdfScene } from './lib/canvasData';
-import { saveProject, loadProject, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
+import { saveProject, loadProject, legacyLessonId, isValidProject, downloadProjectFile, StoredProject, packModels, unpackModels } from './lib/projectStore';
 import { formatBytes } from './lib/assetStore';
 
 interface Scene {
@@ -584,7 +584,7 @@ export default function App() {
     const list: Scene[] = p.scenes.map((s, i) => ({ id: s.id, name: s.name, data: normalizeSceneData(s.data), thumbnail: s.thumbnail, order: i, ...(isBackgroundId(s.background) ? { background: s.background } : {}) }));
     const removed = scenesRef.current.filter(s => !list.some(n => n.id === s.id)).map(s => s.id);
     setProjectName(p.name || '수업');
-    lessonRef.current = { lessonId: p.lessonId || newId() + newId(), fileId: p.driveFileId || null, modified: p.driveModified || null };
+    lessonRef.current = { lessonId: p.lessonId || legacyLessonId(p), fileId: p.driveFileId || null, modified: p.driveModified || null };
     if (isBackgroundId(p.canvasBackground)) setCanvasBackground(p.canvasBackground);
     updateScenes(() => list);
     const target = list.some(s => s.id === p.activeSceneId) ? p.activeSceneId : list[0].id;
@@ -758,6 +758,29 @@ export default function App() {
     } catch {
       toast.error('불러오지 못했습니다.');
     }
+  }, [applyProject]);
+
+  /** 다른 수업을 저장하면서 한 칸 보관해 둔 직전 수업 되살리기 */
+  const handleLoadPrevious = useCallback(async () => {
+    try {
+      const p = await loadProject('previous');
+      if (!p) { toast.info('보관된 직전 수업이 없습니다.', { description: '다른 수업을 저장할 때 원래 수업이 여기에 한 칸 보관됩니다.' }); return; }
+      setConfirmState({
+        title: '직전 수업을 되살릴까요?',
+        message: `'${p.name}' (${new Date(p.savedAt).toLocaleString('ko-KR')} 저장, 슬라이드 ${p.scenes.length}장)\n지금 수업은 저장되어 이 자리(직전 수업)로 옮겨집니다.`,
+        confirmLabel: '되살리기',
+        onConfirm: async () => {
+          await saveRef.current(false);
+          p.lessonId = p.lessonId || legacyLessonId(p);
+          await saveProject(p); // 지금 수업은 '직전 수업' 자리로 옮겨진다
+          applyProject(p, { publish: true });
+          toast.success('직전 수업을 되살렸습니다.');
+        },
+      });
+    } catch {
+      toast.error('불러오지 못했습니다.');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyProject]);
 
   /** 수업 파일 내보내기: 슬라이드에 쓴 3D 모델과 이름표도 함께 담는다 */
@@ -1501,6 +1524,7 @@ export default function App() {
         onRenameProject={name => { setProjectName(name); markDirty(); }}
         onSave={() => { void saveToBrowser(!driveOnRef.current); if (driveOnRef.current) void saveToDrive({ manual: true }); }}
         onLoad={handleLoadFromBrowser}
+        onLoadPrevious={handleLoadPrevious}
         onExportFile={handleExportFile}
         onImportFile={() => projectFileInputRef.current?.click()}
         onExportPDF={() => handleExportPDF('all')}

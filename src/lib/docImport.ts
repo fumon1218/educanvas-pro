@@ -546,7 +546,9 @@ export async function openDocument(file: File, onStatus?: (s: string) => void): 
     } catch { /* 아래 방식으로 */ }
   }
 
-  onStatus?.(`${KIND_OF[e] || '문서'}를 여는 중…`);
+  onStatus?.(HWP_EXT.includes(e) && !rhwpReady
+    ? '한글 문서 엔진을 처음 한 번 받는 중… (약 4MB, 다음부터는 바로 열립니다)'
+    : `${KIND_OF[e] || '문서'}를 여는 중…`);
   try {
     return await openInBrowser(file, e, data);
   } catch (err) {
