@@ -11,7 +11,7 @@ import {
   fileToDataURL,
 } from '@/src/lib/canvasData';
 import { toast } from 'sonner';
-import { PressureBrush, getPenSettings, notePointer } from '@/src/lib/pen';
+import { PressureBrush, getPenSettings, notePointer, deviceHasPen, rememberPen } from '@/src/lib/pen';
 import { appendPaper, makeChecklist } from '@/src/lib/templates';
 
 export type ToolType =
@@ -270,7 +270,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     const el = bgCanvasRef.current, canvas = fabricRef.current, box = containerRef.current;
     if (!el || !canvas || !box) return;
     const dpr = window.devicePixelRatio || 1;
-    const w = box.clientWidth, h = box.clientHeight;
+    const w = canvas.getWidth() || box.clientWidth, h = canvas.getHeight() || box.clientHeight; // 매번 레이아웃을 읽지 않게
     const v = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
     const key = [backgroundRef.current, w, h, dpr, v[0], v[4], v[5]].join('|');
     if (key === bgKeyRef.current) return;
@@ -1607,17 +1607,19 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     };
     let lastPenTime = 0;
     // 펜(애플 펜슬)을 한 번이라도 쓰면, 그 뒤로 손가락 한 개는 그리지 않고 화면만 옮긴다
-    let penSeen = false;
+    // 이 기기에서 펜슬을 쓴 적이 있으면 처음부터 '펜 모드' (다시 열어도 첫 손가락이 펜으로 그어지지 않게)
+    let penSeen = deviceHasPen();
     const fingerPan = { id: -1, x: 0, y: 0 };
     const hoverDot = document.createElement('div');
     hoverDot.setAttribute('aria-hidden', 'true');
-    hoverDot.style.cssText = 'position:absolute;left:0;top:0;border-radius:9999px;pointer-events:none;z-index:30;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 1px rgba(255,255,255,.9);';
+    hoverDot.style.cssText = 'position:absolute;left:0;top:0;border-radius:9999px;pointer-events:none;z-index:30;display:none;will-change:transform;box-shadow:0 0 0 1px rgba(255,255,255,.9);';
     container.appendChild(hoverDot);
     const drawingNow = () => canvas.isDrawingMode || ['eraser', 'laser', 'rect', 'circle', 'triangle', 'line', 'arrow', 'text', 'bucket', 'magnify', 'clip', 'flashcard'].includes(toolRef.current as string);
     const fingerPansNow = () => penSeen && getPenSettings().fingerPans && drawingNow();
     const onPenFirstSeen = () => {
       if (penSeen) return;
       penSeen = true;
+      rememberPen();
       try {
         if (!sessionStorage.getItem('okssam_pen_toast')) {
           sessionStorage.setItem('okssam_pen_toast', '1');
@@ -1625,16 +1627,22 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
         }
       } catch { /* 무시 */ }
     };
+    // 펜 끝 미리보기: 한 프레임에 한 번만, 위치는 transform으로 (레이아웃을 다시 계산하지 않아 배터리 절약)
+    const hover = { raf: 0, x: 0, y: 0, rect: null as DOMRect | null };
     const showHover = (e: PointerEvent) => {
       if (!canvas.isDrawingMode) { hoverDot.style.display = 'none'; return; }
-      const rect = container.getBoundingClientRect();
-      const size = Math.max(4, (canvas.freeDrawingBrush?.width || 4) * canvas.getZoom());
-      hoverDot.style.width = hoverDot.style.height = `${size}px`;
-      hoverDot.style.background = (canvas.freeDrawingBrush?.color as string) || '#000';
-      hoverDot.style.opacity = '0.55';
-      hoverDot.style.left = `${e.clientX - rect.left}px`;
-      hoverDot.style.top = `${e.clientY - rect.top}px`;
-      hoverDot.style.display = 'block';
+      hover.x = e.clientX; hover.y = e.clientY;
+      if (hover.raf) return;
+      hover.raf = requestAnimationFrame(() => {
+        hover.raf = 0;
+        if (!hover.rect) hover.rect = container.getBoundingClientRect();
+        const size = Math.max(4, (canvas.freeDrawingBrush?.width || 4) * canvas.getZoom());
+        hoverDot.style.width = hoverDot.style.height = `${size}px`;
+        hoverDot.style.background = (canvas.freeDrawingBrush?.color as string) || '#000';
+        hoverDot.style.opacity = '0.55';
+        hoverDot.style.transform = `translate(${hover.x - hover.rect.left - size / 2}px, ${hover.y - hover.rect.top - size / 2}px)`;
+        hoverDot.style.display = 'block';
+      });
     };
     /** 체크 목록 줄 앞(☐)을 누르면 체크/해제 (선택·지우개 도구 제외) */
     const toggleCheckAt = (e: PointerEvent): boolean => {
@@ -1690,13 +1698,18 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       notePointer(e);
       if (e.type === 'pointerdown' && (e.buttons || e.pointerType !== 'pen' || e.pressure > 0) && (toggleCheckAt(e) || flipFlashAt(e))) { e.stopPropagation(); e.preventDefault(); return; }
       if (e.pointerType === 'pen') {
-        lastPenTime = Date.now();
         onPenFirstSeen();
-        if (e.pressure === 0 || e.buttons === 0) {
-          // 펜을 화면에 대지 않고 띄워 둔 상태(호버): 어디에 써질지 점으로 보여 준다
-          if (e.type === 'pointermove') showHover(e);
-          e.stopPropagation(); e.preventDefault();
-        } else hoverDot.style.display = 'none';
+        const hovering = e.type === 'pointermove' && e.buttons === 0;
+        if (hovering) {
+          // 펜을 화면에 대지 않고 띄워 둔 상태(호버, 펜슬 프로·2세대): 어디에 써질지 점으로만 보여 준다.
+          // 기본 동작은 막지 않는다 (아이패드 자체 호버 미리보기와 부딪히지 않게)
+          showHover(e);
+          e.stopPropagation();
+        } else {
+          lastPenTime = Date.now(); // 손바닥 무시는 실제로 닿았을 때부터
+          if (hover.raf) { cancelAnimationFrame(hover.raf); hover.raf = 0; }
+          hoverDot.style.display = 'none';
+        }
       } else if (e.pointerType === 'touch') {
         if (fingerPansNow()) {
           // 손가락 한 개 = 화면 옮기기 (그리지 않음)
@@ -1718,13 +1731,32 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       if (e.pointerType === 'pen') hoverDot.style.display = 'none';
     };
     const hideHover = () => { hoverDot.style.display = 'none'; };
+    /** 쓰던 선 버리기 (두 손가락 확대가 시작될 때 첫 손가락으로 시작된 점·선) */
+    let suppressTouches = false;
+    const cancelStroke = () => {
+      const br: any = canvas.freeDrawingBrush;
+      if (br?.cancelStroke) br.cancelStroke();
+      else { br?._reset?.(); canvas.clearContext(canvas.contextTop); }
+      // 판서 엔진의 '그리는 중' 상태도 끈다 → 손을 뗄 때 빈 선(점)을 마무리하지 않음
+      (canvas as any)._isCurrentlyDrawing = false;
+      suppressTouches = true; // 손가락을 모두 뗄 때까지 판서 엔진에 터치를 보내지 않는다
+    };
     const blockPalm = (e: TouchEvent) => {
       let stylus = false;
       for (let i = 0; i < e.touches.length; i++) {
         if ((e.touches[i] as any).touchType === 'stylus') { stylus = true; lastPenTime = Date.now(); onPenFirstSeen(); }
       }
+      if (e.touches.length >= 2 && !stylus) {
+        // 두 손가락 = 확대·이동만. 판서 엔진에 닿기 전에 여기서 처리한다 (첫 닿는 순간 점이 찍히지 않게)
+        if (!suppressTouches) cancelStroke();
+        if (e.type === 'touchstart') onTouchStart(e); else onTouchMove(e);
+        e.stopPropagation();
+        return;
+      }
+      if (suppressTouches && !stylus) { e.stopPropagation(); if (e.cancelable) e.preventDefault(); return; }
       if (e.touches.length === 1 && !stylus && (fingerPansNow() || Date.now() - lastPenTime < 1500)) e.stopPropagation();
     };
+    const endTouches = (e: TouchEvent) => { if (e.touches.length === 0) suppressTouches = false; };
     const cap = { capture: true, passive: false } as AddEventListenerOptions;
     container.addEventListener('pointerdown', blockPenHover, cap);
     container.addEventListener('pointermove', blockPenHover, cap);
@@ -1733,13 +1765,14 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     container.addEventListener('pointerup', endFingerPan, true);
     container.addEventListener('pointercancel', endFingerPan, true);
     container.addEventListener('pointerleave', hideHover);
-    container.addEventListener('touchstart', onTouchStart, { passive: false });
-    container.addEventListener('touchmove', onTouchMove, { passive: false });
+    container.addEventListener('touchend', endTouches, true);
+    container.addEventListener('touchcancel', endTouches, true);
     container.addEventListener('touchend', onTouchEnd);
     container.addEventListener('touchcancel', onTouchEnd);
 
     // --- 크기 변경 ---
     const ro = new ResizeObserver(() => {
+      hover.rect = null;
       canvas.setDimensions({ width: container.clientWidth, height: container.clientHeight });
       canvas.requestRenderAll();
       const lc = laserCanvasRef.current;
@@ -1762,8 +1795,9 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       container.removeEventListener('pointerleave', hideHover);
       hoverDot.remove();
       clearTimeout(hd.timer);
-      container.removeEventListener('touchstart', onTouchStart);
-      container.removeEventListener('touchmove', onTouchMove);
+      container.removeEventListener('touchend', endTouches, true);
+      container.removeEventListener('touchcancel', endTouches, true);
+      if (hover.raf) cancelAnimationFrame(hover.raf);
       container.removeEventListener('touchend', onTouchEnd);
       container.removeEventListener('touchcancel', onTouchEnd);
       window.removeEventListener('keydown', onKeyDown);

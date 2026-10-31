@@ -65,34 +65,52 @@ export class PressureBrush extends fabric.PencilBrush {
   pressureEnabled = true;
   private pts: number[][] = [];
   private active = false;
+  /** 같은 펜 이벤트를 두 번 쓰지 않게 (터치·포인터 이벤트가 둘 다 와도 점이 겹치지 않음) */
+  private lastEv: PointerEvent | null = null;
+  /** 화면 다시 그리기는 한 프레임에 한 번만 (배터리) */
+  private raf = 0;
 
   onMouseDown(pointer: fabric.Point, ev: any) {
     const e = penEvent();
     this.active = !!(this.pressureEnabled && e);
     if (!this.active) return super.onMouseDown(pointer, ev);
+    this.lastEv = e;
     this.pts = [[pointer.x, pointer.y, e!.pressure || 0.5]];
-    this.renderLive();
+    this.scheduleLive();
   }
 
   onMouseMove(pointer: fabric.Point, ev: any) {
     if (!this.active) return super.onMouseMove(pointer, ev);
     const e = penEvent();
-    // 사이사이 놓친 펜 위치(coalesced)까지 모아 매끄럽게
-    const extra = e && typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
-    if (extra.length > 1) {
-      const inv = fabric.util.invertTransform(this.canvas.viewportTransform);
-      const rect = this.canvas.upperCanvasEl.getBoundingClientRect();
-      for (const ce of extra) {
-        const p = fabric.util.transformPoint(new fabric.Point(ce.clientX - rect.left, ce.clientY - rect.top), inv);
-        this.pts.push([p.x, p.y, ce.pressure || 0.5]);
+    const minGap = 0.6 / (this.canvas.getZoom() || 1); // 화면에서 0.6px보다 가까운 점은 버린다
+    const push = (x: number, y: number, pr: number) => {
+      const last = this.pts[this.pts.length - 1];
+      if (last && Math.abs(last[0] - x) < minGap && Math.abs(last[1] - y) < minGap) { last[2] = Math.max(last[2], pr); return; }
+      this.pts.push([x, y, pr]);
+    };
+    // 사이사이 놓친 펜 위치(coalesced)까지 모아 매끄럽게 — 새 이벤트일 때만
+    if (e && e !== this.lastEv && typeof e.getCoalescedEvents === 'function') {
+      this.lastEv = e;
+      const extra = e.getCoalescedEvents();
+      if (extra.length > 1) {
+        const inv = fabric.util.invertTransform(this.canvas.viewportTransform);
+        const rect = this.canvas.upperCanvasEl.getBoundingClientRect();
+        for (const ce of extra) {
+          const p = fabric.util.transformPoint(new fabric.Point(ce.clientX - rect.left, ce.clientY - rect.top), inv);
+          push(p.x, p.y, ce.pressure || 0.5);
+        }
+        this.scheduleLive();
+        return;
       }
-    } else this.pts.push([pointer.x, pointer.y, e?.pressure || 0.5]);
-    this.renderLive();
+    }
+    push(pointer.x, pointer.y, e?.pressure || 0.5);
+    this.scheduleLive();
   }
 
   onMouseUp(ev: any) {
     if (!this.active) return super.onMouseUp(ev);
     this.active = false;
+    cancelAnimationFrame(this.raf); this.raf = 0;
     const ctx = this.canvas.contextTop;
     this.canvas.clearContext(ctx);
     if (this.pts.length === 0) return false;
@@ -113,6 +131,20 @@ export class PressureBrush extends fabric.PencilBrush {
     return false;
   }
 
+  /** 쓰던 선을 버린다 (두 손가락 확대가 시작될 때) */
+  cancelStroke() {
+    this.active = false;
+    this.pts = [];
+    cancelAnimationFrame(this.raf); this.raf = 0;
+    (this as any)._reset?.(); // PencilBrush의 쌓인 점도 비움 → 손을 떼도 선이 생기지 않음
+    this.canvas.clearContext(this.canvas.contextTop);
+  }
+
+  private scheduleLive() {
+    if (this.raf) return;
+    this.raf = requestAnimationFrame(() => { this.raf = 0; if (this.active) this.renderLive(); });
+  }
+
   private renderLive() {
     const ctx = this.canvas.contextTop;
     this.canvas.clearContext(ctx);
@@ -127,3 +159,8 @@ export class PressureBrush extends fabric.PencilBrush {
     ctx.restore();
   }
 }
+
+/** 이 기기에서 펜슬을 쓴 적이 있는가 (다시 열어도 손가락으로 그어지지 않게) */
+const HAS_PEN_KEY = 'okssam_has_pencil';
+export const deviceHasPen = () => { try { return localStorage.getItem(HAS_PEN_KEY) === '1'; } catch { return false; } };
+export const rememberPen = () => { try { localStorage.setItem(HAS_PEN_KEY, '1'); } catch { /* 무시 */ } };
