@@ -1,4 +1,5 @@
 import * as fabric from 'fabric';
+import { paperImage } from './templates';
 
 /** 캔버스 직렬화 시 함께 저장할 사용자 정의 속성 */
 export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url', 'clipStart', 'clipEnd', 'isModel', 'modelId', 'modelName', 'driveId', 'isScore', 'scoreData', 'scoreTitle', 'scoreKey', 'scoreBoxes', 'pageNo', 'docId', 'docPage', 'isFlash', 'flashBox', 'flashDue', 'field', 'fieldLabel', 'isPlaceholder', 'checklist', 'notebook', 'bibleRef'];
@@ -20,8 +21,19 @@ export function normalizeSceneData(raw: unknown): string | null {
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed === 'string') return normalizeSceneData(parsed);
-    // 예전 양식(v0.11.0)의 회색 예시 글자는 빈칸으로
-    if (raw.includes('"isPlaceholder":true')) {
+    // 예전 양식(v0.11.0~0.11.2) 정리: 회색 예시 글자 → 빈칸, 설교 노트 첫 쪽 → 대지·기도 제목 없는 새 종이
+    if (raw.includes('"isPlaceholder":true') || raw.includes('"notebook":"sermon"')) {
+      const sermon = raw.includes('"notebook":"sermon"');
+      if (sermon) {
+        const keep: any[] = [];
+        for (const o of parsed.objects || []) {
+          if (o?.notebook === 'sermon' && o.type?.toLowerCase().includes('image')) { o.src = paperImage('sermon', true); keep.push(o); continue; }
+          if (o?.field === 'date' && /^\d{4}\.\d{1,2}\.\d{1,2} \(.\)$/.test(String(o.text || '').trim())) { o.text = ''; o.styles = []; }
+          if (o?.checklist === 'prayer' && !String(o.text || '').replace(/[☐☑\s]/g, '')) continue; // 비어 있는 기도 목록
+          keep.push(o);
+        }
+        parsed.objects = keep;
+      }
       const walk = (list: any[]) => list?.forEach(o => {
         if (o?.objects) walk(o.objects);
         if (o?.isPlaceholder) { o.text = ''; o.fill = '#0f172a'; delete o.isPlaceholder; o.styles = []; }
