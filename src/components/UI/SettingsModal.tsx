@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { getPenSettings, setPenSettings, type PenSettings } from '@/src/lib/pen';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Layout, LogOut, Users } from 'lucide-react';
 import { useAccess } from '@/src/components/Access/AccessGate';
@@ -13,6 +14,8 @@ interface SettingsModalProps {
   onCanvasBackgroundChange: (bg: CanvasBackground, scope: BackgroundScope) => void;
   isVertical: boolean;
   onToggleOrientation: () => void;
+  studentMode?: boolean;
+  onStudentMode?: (on: boolean) => void;
 }
 
 const SHORTCUTS: [string, string][] = [
@@ -28,7 +31,7 @@ const SHORTCUTS: [string, string][] = [
 ];
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
-  isOpen, onClose, canvasBackground, onCanvasBackgroundChange, isVertical, onToggleOrientation,
+  isOpen, onClose, canvasBackground, onCanvasBackgroundChange, isVertical, onToggleOrientation, studentMode = false, onStudentMode,
 }) => {
   const access = useAccess();
   return (
@@ -79,6 +82,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <BackgroundPicker value={canvasBackground} onChange={onCanvasBackgroundChange} />
             </div>
 
+            <label className="flex items-center justify-between gap-4 cursor-pointer">
+              <span className="space-y-1">
+                <span className="block text-sm font-semibold text-gray-700">학생 모드</span>
+                <span className="block text-xs text-gray-500">공유·협업·학생 화면·AI를 숨기고 공부 도구(오답 모으기·가림 카드·복습·공부 기록)를 앞에 둡니다</span>
+              </span>
+              <input type="checkbox" className="w-5 h-5 accent-emerald-600 shrink-0" checked={studentMode} onChange={e => onStudentMode?.(e.target.checked)} aria-label="학생 모드" />
+            </label>
+
+            <PenSection />
+
             <div className="flex items-center justify-between">
               <div className="space-y-1">
                 <div className="text-sm font-semibold text-gray-700">도구 막대 위치</div>
@@ -106,5 +119,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
     )}
   </AnimatePresence>
+  );
+};
+
+/** 애플 펜슬 설정 (이 기기에 저장) */
+const PenSection: React.FC = () => {
+  const [pen, setPen] = useState<PenSettings>(getPenSettings);
+  const Toggle: React.FC<{ k: keyof PenSettings; title: string; desc: string }> = ({ k, title, desc }) => (
+    <label className="flex items-center justify-between gap-4 cursor-pointer">
+      <span className="space-y-0.5">
+        <span className="block text-[13px] font-medium text-gray-800">{title}</span>
+        <span className="block text-xs text-gray-500">{desc}</span>
+      </span>
+      <input type="checkbox" role="switch" className="sr-only peer" checked={pen[k]} onChange={e => setPen(setPenSettings({ [k]: e.target.checked }))} />
+      <span className="relative w-10 h-6 shrink-0 rounded-full bg-gray-300 peer-checked:bg-indigo-600 transition-colors after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:after:translate-x-4" aria-hidden />
+    </label>
+  );
+  return (
+    <div className="space-y-3">
+      <div className="text-sm font-semibold text-gray-700">애플 펜슬 · 스타일러스</div>
+      <Toggle k="pressure" title="필압 쓰기" desc="세게 누르면 굵게, 살짝 대면 가늘게 (펜·연필·만년필·볼펜)" />
+      <Toggle k="fingerPans" title="펜을 쓰면 손가락은 화면 이동만" desc="손바닥·손가락이 닿아도 그어지지 않습니다. 두 손가락으로 확대합니다." />
+    </div>
   );
 };

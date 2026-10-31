@@ -4,7 +4,7 @@ import { X, History, Loader2, RotateCcw } from 'lucide-react';
 import { listHistory, type HistoryEntry } from '@/src/lib/projectStore';
 
 const REASON: Record<HistoryEntry['reason'], string> = {
-  replaced: '다른 수업으로 바뀌기 전',
+  replaced: '예전 저장 방식에서 옮겨 옴',
   snapshot: '자동 보관 (20분마다)',
   'before-restore': '되살리기 전 수업',
 };
@@ -12,15 +12,17 @@ const REASON: Record<HistoryEntry['reason'], string> = {
 /** 수업 기록: 덮어쓰기 전·20분마다 자동으로 보관된 수업 (최근 15개) */
 export const LessonHistoryModal: React.FC<{
   isOpen: boolean;
+  /** 이 수업의 기록만 (없으면 모두) */
+  lessonId?: string;
   onClose: () => void;
   onRestore: (e: HistoryEntry) => void;
-}> = ({ isOpen, onClose, onRestore }) => {
+}> = ({ isOpen, lessonId, onClose, onRestore }) => {
   const [items, setItems] = useState<HistoryEntry[] | null>(null);
   useEffect(() => {
     if (!isOpen) return;
     setItems(null);
-    listHistory().then(setItems).catch(() => setItems([]));
-  }, [isOpen]);
+    listHistory(lessonId).then(setItems).catch(() => setItems([]));
+  }, [isOpen, lessonId]);
 
   return (
     <AnimatePresence>
@@ -36,13 +38,13 @@ export const LessonHistoryModal: React.FC<{
               <div className="p-2 rounded-xl bg-amber-50 text-amber-600"><History size={20} /></div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-slate-900">수업 기록</h2>
-                <p className="text-xs text-slate-500">다른 수업을 저장하기 전과 20분마다 이 브라우저에 자동 보관합니다 (최근 15개).</p>
+                <p className="text-xs text-slate-500">이 수업의 20분 전·1시간 전 모습 등을 자동으로 보관합니다 (모든 수업 합쳐 최근 30개).</p>
               </div>
               <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full" aria-label="닫기"><X size={20} /></button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-2">
               {items === null ? <div className="py-10 flex justify-center text-slate-400"><Loader2 className="animate-spin" /></div>
-                : items.length === 0 ? <p className="py-10 text-center text-sm text-slate-400">아직 보관된 기록이 없습니다.</p>
+                : items.length === 0 ? <p className="py-10 text-center text-sm text-slate-400">아직 보관된 기록이 없습니다. 수업을 20분 넘게 고치면 그 전 모습이 여기에 남습니다.</p>
                 : (
                   <ul className="divide-y divide-slate-100">
                     {items.map(h => (

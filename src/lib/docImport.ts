@@ -18,6 +18,8 @@ export interface PageSource {
   destroy?: () => void;
   /** 변환이 원본과 다를 수 있을 때 알려 줄 말 */
   note?: string;
+  /** 고화질 확대용 원본 (PDF·한글만: 확대하면 원본에서 다시 그린다) */
+  hd?: { kind: 'pdf' | 'hwp'; data: ArrayBuffer };
 }
 
 const ext = (name: string) => (name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || '');
@@ -88,6 +90,7 @@ export async function pdfSource(data: ArrayBuffer, kind = 'PDF'): Promise<PageSo
     import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
   ]);
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  const hdCopy = data.slice(0); // pdf.js가 원본 버퍼를 가져가므로 고화질용 사본을 남긴다
   let doc;
   try { doc = await pdfjs.getDocument({ data }).promise; }
   catch (e: any) {
@@ -97,6 +100,7 @@ export async function pdfSource(data: ArrayBuffer, kind = 'PDF'): Promise<PageSo
   return {
     kind,
     numPages: doc.numPages,
+    hd: { kind: 'pdf', data: hdCopy },
     render: async (i, maxW) => {
       const page = await doc.getPage(i);
       const base = page.getViewport({ scale: 1 });
@@ -118,6 +122,8 @@ export async function pdfSource(data: ArrayBuffer, kind = 'PDF'): Promise<PageSo
 // ---------------------------------------------------------------------------
 
 let rhwpReady: Promise<any> | null = null;
+/** 고화질 확대에서도 같은 한글 엔진을 쓴다 */
+export const loadRhwpModule = () => loadRhwp();
 const loadRhwp = () => {
   if (!rhwpReady) {
     rhwpReady = (async () => {
@@ -151,6 +157,7 @@ async function hwpSource(data: ArrayBuffer): Promise<PageSource> {
   return {
     kind: '한글 문서',
     numPages: n,
+    hd: { kind: 'hwp', data },
     render: async (i, maxW) => {
       const c = document.createElement('canvas');
       doc.renderPageToCanvas(i - 1, c, 1);

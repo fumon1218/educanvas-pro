@@ -4,6 +4,7 @@ import {
   Pencil, Pen, Feather, Minus, Eraser, Zap, MousePointer2, Circle, Square, Triangle as TriangleIcon, Shapes, Type,
   PaintBucket, Highlighter, Upload, Link, Undo2, Redo2, Hand, Pipette, Scissors, Copy, ClipboardPaste,
   Lasso, Slash, MoveRight, Pentagon, Globe, Box, Music, ImagePlus, MoreHorizontal, Palette, ZoomIn,
+  BookmarkPlus, SquareDashed, Layers, BarChart3, GraduationCap,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -34,6 +35,12 @@ interface ToolbarProps {
   onCopy?: () => void;
   onPaste?: () => void;
   onCut?: () => void;
+  /** 플래시카드(가림 카드) 복습 시작 */
+  onStartReview?: () => void;
+  /** 공부 기록·집중 타이머 */
+  onOpenStudy?: () => void;
+  /** 학생 모드: 공부 도구를 앞에 */
+  studentMode?: boolean;
 }
 
 const QUICK_COLORS = [
@@ -55,6 +62,7 @@ const PEN_TOOLS: ToolType[] = ['pen', 'pencil', 'fountain', 'ballpoint', 'dashed
 export const Toolbar: React.FC<ToolbarProps> = ({
   activeTool, onToolSelect, onAddShape, onAddText, color, onColorChange, brushSize, onBrushSizeChange,
   isVertical, onAddFile, onAddWebLink, onUndo, onRedo, onCopy, onPaste, onCut, onOpenWebWindow, onOpenAssets,
+  onStartReview, onOpenStudy, studentMode,
 }) => {
   const [menu, setMenu] = useState<string | null>(null);
   const [recentColors, setRecentColors] = useState<string[]>([]);
@@ -125,6 +133,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         { id: 'weblink', icon: Link, label: '웹 링크 카드', action: handleWebLinkPrompt },
       ],
     },
+    study: {
+      title: '공부 도구',
+      items: [
+        { id: 'clip', icon: BookmarkPlus, label: '오답 모으기', hint: '문제를 끌어 감싸면 오답 노트에 쌓기' },
+        { id: 'flashcard', icon: SquareDashed, label: '가림 카드 만들기', hint: '외울 곳을 끌어 덮기 · 누르면 뒤집힘' },
+        { id: 'review', icon: Layers, label: '플래시카드 복습', hint: '모르는 카드부터 다시 보기', action: () => onStartReview?.() },
+        { id: 'studylog', icon: BarChart3, label: '공부 기록·집중 타이머', action: () => onOpenStudy?.() },
+      ],
+    },
     more: {
       title: '더 보기',
       items: [
@@ -190,6 +207,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <Row icon={Type} label="글자" onClick={() => { onAddText(); setMenu(null); }} />
         <Row icon={Zap} label="레이저" active={activeTool === 'laser'} onClick={() => { onToolSelect('laser'); setMenu(null); }} />
         <Row icon={ImagePlus} label="자료 넣기" caret active={menu === 'media'} onClick={() => toggle('media')} />
+        <Row icon={GraduationCap} label={studentMode ? '공부 도구' : '공부·복습'} caret active={menu === 'study' || ['clip', 'flashcard'].includes(activeTool)} onClick={() => toggle('study')} />
         <Row icon={MoreHorizontal} label="더 보기" caret active={menu === 'more' || ['lasso', 'bucket', 'eyedropper', 'magnify'].includes(activeTool)} onClick={() => toggle('more')} />
 
         <div className={cn('bg-slate-200/80', isVertical ? 'h-px mx-1 my-2' : 'w-px h-7 mx-1')} />

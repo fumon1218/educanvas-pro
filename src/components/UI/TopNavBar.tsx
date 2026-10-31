@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown, Users, Share, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Sparkles, ArrowRight,
   Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer, Play, Cloud, CloudOff, Eraser, Paintbrush, MonitorSmartphone,
-  History,
+  History, LayoutGrid,
 } from 'lucide-react';
 import { glass } from './BottomNavBar';
 import { cn } from '@/src/lib/utils';
@@ -44,6 +44,8 @@ interface TopNavBarProps {
   background: CanvasBackground;
   onBackgroundChange: (bg: CanvasBackground, scope: BackgroundScope) => void;
   onOpenStudentCast: () => void;
+  /** 학생 모드: 공유·협업·학생 화면·AI를 숨긴다 */
+  studentMode?: boolean;
   castCount?: number;
   castOn?: boolean;
   driveState?: 'off' | 'synced' | 'saving' | 'pending' | 'need-auth' | 'error' | 'conflict';
@@ -73,7 +75,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
   isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
   onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false, saveState = 'saved',
-  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false, driveState = 'off', onOpenLessons,
+  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false, driveState = 'off', onOpenLessons, studentMode = false,
 }) => {
   const [bgOpen, setBgOpen] = useState(false);
   const bgRef = useRef<HTMLDivElement>(null);
@@ -147,6 +149,10 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
           <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="w-8 h-8 rounded-[10px] shadow-sm" />
           <span className="hidden md:inline text-[17px] font-extrabold text-slate-900 tracking-tight">옥쌤보드</span>
         </div>
+        <button onClick={onOpenLessons} className="flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-[14px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 shrink-0" aria-label="내 수업 목록" title="내 수업 목록 (저장한 수업 모두 보기·분류)">
+          <LayoutGrid size={16} />
+          <span className="hidden sm:inline whitespace-nowrap">내 수업</span>
+        </button>
         <div className="w-px h-6 bg-slate-200" />
         <div className="relative" ref={menuRef}>
           <button onClick={() => setIsFileMenuOpen(o => !o)} className="flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-[14px] font-medium text-slate-700 hover:bg-slate-900/[0.05]" aria-haspopup="menu" aria-expanded={isFileMenuOpen}>
@@ -164,8 +170,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
                 className="absolute z-50 top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] ring-1 ring-slate-900/[0.07] overflow-hidden py-1.5"
               >
                 <MenuItem icon={Save} label="저장" hint="Ctrl+S" onClick={run(onSave)} />
-                <MenuItem icon={Cloud} label="내 수업 (구글 드라이브)" hint="모든 기기" onClick={run(onOpenLessons)} />
-                <MenuItem icon={FolderOpen} label="이 브라우저에 저장한 수업" onClick={run(onLoad)} />
+                <MenuItem icon={LayoutGrid} label="내 수업 (목록·분류)" hint="모든 수업" onClick={run(onOpenLessons)} />
                 {onOpenHistory && <MenuItem icon={History} label="수업 기록 (자동 보관)" hint="되살리기" onClick={run(onOpenHistory)} />}
                 <div className="h-px bg-slate-100 my-1" />
                 <MenuItem icon={Download} label="파일로 내보내기 (.json)" onClick={run(onExportFile)} />
@@ -203,7 +208,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
             onClick={onOpenLessons}
             className={cn('shrink-0 flex items-center gap-1 h-8 px-2 rounded-lg hover:bg-slate-900/[0.05] text-[12px] font-medium',
               driveState === 'synced' ? 'text-sky-600' : driveState === 'need-auth' || driveState === 'conflict' ? 'text-amber-600' : driveState === 'error' || saveState === 'error' ? 'text-red-500' : 'text-slate-400')}
-            title={DRIVE_TITLES[driveState] ?? (saveState === 'saved' ? '이 브라우저에 저장됨 · 눌러서 구글 드라이브 동기화 켜기' : saveState === 'dirty' ? '저장 대기 중 (곧 자동 저장)' : '저장하지 못했습니다')}
+            title={DRIVE_TITLES[driveState] ?? (saveState === 'saved' ? '이 컴퓨터에 자동 저장됨 · 눌러서 내 수업 목록 보기' : saveState === 'dirty' ? '저장 대기 중 (곧 자동 저장)' : '저장하지 못했습니다')}
             aria-label="내 수업 (저장 상태)"
           >
             {driveState === 'saving' ? <Cloud size={17} className="animate-pulse" /> : saveState === 'error' || driveState === 'error' ? <CloudOff size={17} /> : <Cloud size={17} />}
@@ -217,6 +222,8 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
           <Play size={15} fill="currentColor" />
           <span className="hidden sm:inline whitespace-nowrap">발표</span>
         </button>
+        {studentMode && <span className="hidden sm:inline-flex items-center h-8 px-3 rounded-full bg-emerald-50 text-emerald-700 text-[12.5px] font-semibold ring-1 ring-emerald-200" title="설정에서 바꿀 수 있습니다">학생 모드</span>}
+        {!studentMode && <>
         <button
           onClick={onOpenStudentCast}
           className={cn('flex items-center gap-2 h-10 px-3.5 rounded-xl text-[14px] font-medium', castOn ? 'bg-sky-50 text-sky-700 ring-1 ring-sky-200' : 'text-slate-700 hover:bg-slate-900/[0.05]')}
@@ -252,6 +259,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
             {isGenerating ? <Sparkles size={16} className="animate-spin" /> : <Sparkles size={16} />}
           </button>
         </div>
+        </>}
       </div>
 
       {/* 오른쪽 위 수업 도구 카드 */}

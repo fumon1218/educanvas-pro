@@ -1,7 +1,7 @@
 import * as fabric from 'fabric';
 
 /** 캔버스 직렬화 시 함께 저장할 사용자 정의 속성 */
-export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url', 'clipStart', 'clipEnd', 'isModel', 'modelId', 'modelName', 'driveId', 'isScore', 'scoreData', 'scoreTitle', 'scoreKey', 'scoreBoxes', 'pageNo'];
+export const EXTRA_PROPS = ['id', 'locked', 'isBackground', 'isVideo', 'isAudio', 'audioUrl', 'isWebLink', 'url', 'clipStart', 'clipEnd', 'isModel', 'modelId', 'modelName', 'driveId', 'isScore', 'scoreData', 'scoreTitle', 'scoreKey', 'scoreBoxes', 'pageNo', 'docId', 'docPage', 'isFlash', 'flashBox', 'flashDue'];
 
 /** 세션 동안 살아 있는 동영상 요소 (blob URL → video element) */
 export const videoRegistry = new Map<string, HTMLVideoElement>();
@@ -146,7 +146,7 @@ export async function renderSceneImage(
 }
 
 /** 이미지 한 장을 화면 가운데에 배치한 장면 데이터를 만든다 (PDF 페이지별 슬라이드) */
-export async function createImageScene(dataUrl: string, width: number, height: number): Promise<string> {
+export async function createImageScene(dataUrl: string, width: number, height: number, doc?: { docId: string; docPage: number }): Promise<string> {
   const el = document.createElement('canvas');
   const sc = new fabric.StaticCanvas(el, { width, height, enableRetinaScaling: false });
   const img = await fabric.FabricImage.fromURL(dataUrl);
@@ -163,6 +163,7 @@ export async function createImageScene(dataUrl: string, width: number, height: n
   (img as any).id = newId();
   (img as any).locked = true;
   (img as any).isBackground = true;
+  if (doc) { (img as any).docId = doc.docId; (img as any).docPage = doc.docPage; }
   sc.add(img);
   sc.centerObject(img);
   const out = serializeCanvas(sc);
@@ -171,7 +172,7 @@ export async function createImageScene(dataUrl: string, width: number, height: n
 }
 
 /** PDF 여러 쪽을 한 슬라이드에 위에서 아래로 이어 붙인 장면 (PageDown으로 한 쪽씩 넘긴다) */
-export async function createStackedPdfScene(pages: string[], firstPageNo: number, width: number): Promise<string> {
+export async function createStackedPdfScene(pages: string[], firstPageNo: number, width: number, docId?: string | null): Promise<string> {
   const el = document.createElement('canvas');
   const sc = new fabric.StaticCanvas(el, { width, height: 800, enableRetinaScaling: false });
   const pageW = Math.max(400, width - 100);
@@ -190,6 +191,7 @@ export async function createStackedPdfScene(pages: string[], firstPageNo: number
     (img as any).locked = true;
     (img as any).isBackground = true;
     (img as any).pageNo = firstPageNo + i;
+    if (docId) { (img as any).docId = docId; (img as any).docPage = firstPageNo + i; }
     sc.add(img);
     y += img.getScaledHeight() + 32;
   }
