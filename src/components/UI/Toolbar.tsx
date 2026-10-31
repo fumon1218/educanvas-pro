@@ -3,7 +3,7 @@ import { askText } from './PromptHost';
 import React, { useState } from 'react';
 import {
   Pencil, Pen, Feather, Minus, Eraser, Zap, MousePointer2, Circle, Square, Triangle as TriangleIcon, Shapes, Type,
-  PaintBucket, Highlighter, Upload, Link, Undo2, Redo2, Hand, Pipette, Scissors, Copy, ClipboardPaste,
+  CalendarDays, PaintBucket, Highlighter, Upload, Link, Undo2, Redo2, Hand, Pipette, Scissors, Copy, ClipboardPaste,
   Lasso, Slash, MoveRight, Pentagon, Globe, Box, Music, ImagePlus, MoreHorizontal, Palette, ZoomIn,
   BookmarkPlus, SquareDashed, Layers, BarChart3, GraduationCap, NotebookPen, ListChecks, HeartHandshake, BookOpen, FilePlus2,
 } from 'lucide-react';
@@ -43,7 +43,7 @@ interface ToolbarProps {
   /** 학생 모드: 공부 도구를 앞에 */
   studentMode?: boolean;
   /** 노트 도구: 할 일·기도 제목 목록, 성경 구절, 공책 쪽 추가 */
-  onNoteTool?: (kind: 'todo' | 'prayer' | 'bible' | 'page') => void;
+  onNoteTool?: (kind: 'todo' | 'prayer' | 'bible' | 'page' | 'calendar') => void;
   /** 휴대폰: 아래쪽 가로 막대, 옆으로 밀어 보기 */
   isPhone?: boolean;
 }
@@ -144,6 +144,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         { id: 'n-todo', icon: ListChecks, label: '할 일 목록', hint: '☐를 누르면 체크 · @담당 ~기한', action: () => onNoteTool?.('todo') },
         { id: 'n-prayer', icon: HeartHandshake, label: '기도 제목', hint: '설교 공간에서 모아 보기', action: () => onNoteTool?.('prayer') },
         { id: 'n-bible', icon: BookOpen, label: '성경 구절 카드', hint: '예: 롬 8:28', action: () => onNoteTool?.('bible') },
+        { id: 'n-cal', icon: CalendarDays, label: '달력', hint: '월간 달력·주간 계획표 (공휴일 표시)', action: () => onNoteTool?.('calendar') },
         { id: 'n-page', icon: FilePlus2, label: '공책 쪽 추가', hint: '줄 공책·양식 노트 아래에 한 쪽 더', action: () => onNoteTool?.('page') },
       ],
     },
