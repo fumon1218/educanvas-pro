@@ -15,6 +15,8 @@ const COLORS: { c: string; n: string }[] = [
   { c: '#be123c', n: '빨강' },
   { c: '#0f172a', n: '검정' },
   { c: '#047857', n: '초록' },
+  { c: '#b45309', n: '주황' },
+  { c: '#6b7280', n: '회색' },
 ];
 const BANNER = '#a7f3d0';
 
@@ -39,26 +41,32 @@ const DEFAULT_ITEMS: PlanItem[] = [
   { text: '대집회', kind: 'banner', color: BANNER },
   { text: '소집회 19:30~', kind: 'banner', color: BANNER },
 ];
-/** 업무 월간 계획 기본 항목 (학교·기관 업무에서 자주 쓰는 일정) */
+/**
+ * 업무 월간 계획 기본 항목 — 업무 스케줄러(edu-scheduler-premium)의 분류와 색을 따름
+ *  일정: 수업(파랑)·회의(초록)·출장(주황)·행사(노랑)·개인업무(회색)
+ *  할 일: 수업준비·행정·공문·시설/비품·상담, 그리고 방문예약·결재·보고·마감
+ */
 const WORK_ITEMS: PlanItem[] = [
-  { text: '회의', kind: 'chip', color: '#0f172a' },
-  { text: '보고', kind: 'chip', color: '#be123c' },
+  { text: '수업', kind: 'chip', color: '#1d4ed8' },
+  { text: '회의', kind: 'chip', color: '#15803d' },
+  { text: '출장', kind: 'chip', color: '#b45309' },
+  { text: '행사', kind: 'chip', color: '#a16207' },
+  { text: '개인업무', kind: 'chip', color: '#6b7280' },
+  { text: '수업준비', kind: 'chip', color: '#1d4ed8' },
+  { text: '행정', kind: 'chip', color: '#15803d' },
+  { text: '공문', kind: 'chip', color: '#be123c' },
+  { text: '시설/비품', kind: 'chip', color: '#b45309' },
+  { text: '상담', kind: 'chip', color: '#a16207' },
+  { text: '방문예약', kind: 'chip', color: '#1e3a8a' },
   { text: '결재', kind: 'chip', color: '#be123c' },
+  { text: '보고', kind: 'chip', color: '#be123c' },
   { text: '마감', kind: 'chip', color: '#be123c' },
-  { text: '공문 발송', kind: 'chip', color: '#1e3a8a' },
-  { text: '출장', kind: 'chip', color: '#1e3a8a' },
-  { text: '외근', kind: 'chip', color: '#1e3a8a' },
   { text: '연수', kind: 'chip', color: '#047857' },
-  { text: '교육', kind: 'chip', color: '#047857' },
-  { text: '행사', kind: 'chip', color: '#047857' },
-  { text: '점검', kind: 'chip', color: '#0f172a' },
-  { text: '예산·회계', kind: 'chip', color: '#0f172a' },
-  { text: '면담', kind: 'chip', color: '#0f172a' },
-  { text: '당직', kind: 'chip', color: '#0f172a' },
-  { text: '휴가', kind: 'chip', color: '#047857' },
-  { text: '출장 기간', kind: 'banner', color: '#bfdbfe' },
-  { text: '행사 기간', kind: 'banner', color: BANNER },
-  { text: '연수 기간', kind: 'banner', color: '#fde68a' },
+  { text: '휴가', kind: 'chip', color: '#6b7280' },
+  { text: '출장 기간', kind: 'banner', color: '#fde68a' },
+  { text: '행사 기간', kind: 'banner', color: '#fef08a' },
+  { text: '연수 기간', kind: 'banner', color: BANNER },
+  { text: '방학', kind: 'banner', color: '#e2e8f0' },
 ];
 const defaultsOf = (kind: string) => (kind === 'workplan' ? WORK_ITEMS : DEFAULT_ITEMS);
 const keyOf = (kind: string) => (kind === 'workplan' ? 'okssam_plan_items_work' : 'okssam_plan_items');
@@ -161,7 +169,7 @@ export const PlanPalette: React.FC<{
           <form onSubmit={e => { e.preventDefault(); add(); }} className="border-t border-slate-100 p-2.5 space-y-1.5">
             <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.stopPropagation()} placeholder={sel != null ? '바꿀 이름' : '새 항목 (예: 성탄 발표회)'} aria-label={sel != null ? '항목 이름' : '새 항목'}
               className="w-full h-8 px-2.5 rounded-lg bg-slate-100 text-[13px] outline-none focus:bg-white focus:ring-2 focus:ring-indigo-200" />
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               {COLORS.map(c => <button type="button" key={c.c} onClick={() => { setDraftColor(c.c); setDraftBanner(false); }} className={cn('w-5 h-5 rounded-full', !draftBanner && draftColor === c.c && 'ring-2 ring-offset-1 ring-indigo-500')} style={{ background: c.c }} aria-label={`글자 색 ${c.n}`} />)}
               <button type="button" onClick={() => setDraftBanner(b => !b)} className={cn('h-6 px-2 rounded-md text-[11px] font-semibold', draftBanner ? 'bg-emerald-200 text-emerald-900 ring-2 ring-emerald-500' : 'bg-emerald-100 text-emerald-800')}>긴 띠</button>
               {sel != null

@@ -329,6 +329,8 @@ function churchPlanLayout(date: Date, holidays: Record<string, string>): Layout 
 
 const WP = { x0: 70, dayW: 128, weekW: 204, top: 228, topBottom: 420, head: 440, headH: 48, gridBottom: 1380, foot: 1400, footBottom: 1700 };
 const WD_KO_MON = ['월', '화', '수', '목', '금', '토', '일'];
+/** 일정 분류와 색 (업무 스케줄러 edu-scheduler-premium의 분류) */
+export const WORK_LEGEND: [string, string][] = [['수업', '#2563eb'], ['회의', '#16a34a'], ['출장', '#d97706'], ['행사', '#ca8a04'], ['개인업무', '#6b7280']];
 
 function workPlanLayout(date: Date, holidays: Record<string, string>): Layout {
   const y = date.getFullYear(), m = date.getMonth();
@@ -337,11 +339,12 @@ function workPlanLayout(date: Date, holidays: Record<string, string>): Layout {
   const rows = cells.length / 7;
   const rh = (WP.gridBottom - WP.head - WP.headH) / rows;
   const goalW = (x1 - WP.x0) * 0.58;
+  // 아래 칸 (업무 스케줄러의 할 일 분류: 공문·행정·시설/비품·상담, 출장, 방문예약 참고)
   const foot = [
-    { t: '정기 업무 (매주·매월 반복)', w: 0.26 },
-    { t: '이월 업무 (지난달 남은 일)', w: 0.26 },
-    { t: '메모', w: 0.22 },
-    { t: '월말 돌아보기', w: 0.26 },
+    { t: '공문·행정 처리 (문서번호·기한)', w: 0.27 },
+    { t: '정기·이월 업무', w: 0.25 },
+    { t: '출장·방문 일정', w: 0.24 },
+    { t: '월말 돌아보기', w: 0.24 },
   ];
   const footX = foot.map((_, i) => WP.x0 + foot.slice(0, i).reduce((a, f) => a + f.w, 0) * (x1 - WP.x0));
   return {
@@ -360,6 +363,13 @@ function workPlanLayout(date: Date, holidays: Record<string, string>): Layout {
       c.textAlign = 'left';
       label(c, '부서·이름', 990, 86, 18, '#64748b');
       line(c, 990, 170, x1, 170, '#cbd5e1', 1.5);
+      // 일정 분류 색 (업무 스케줄러와 같은 색)
+      let lx = 520;
+      for (const [t, col] of WORK_LEGEND) {
+        c.fillStyle = col; c.beginPath(); c.arc(lx + 7, 204, 7, 0, Math.PI * 2); c.fill();
+        label(c, t, lx + 20, 192, 18, '#475569', false);
+        c.font = `18px ${KFONT}`; lx += 20 + c.measureText(t).width + 22;
+      }
       // 이달의 목표 · 주요 마감
       box(c, WP.x0, WP.top, goalW - 10, WP.topBottom - WP.top);
       label(c, '이달의 목표 (측정할 수 있게 3가지)', WP.x0 + 16, WP.top + 12, 22, '#0f766e');
