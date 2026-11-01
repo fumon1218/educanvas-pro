@@ -47,6 +47,8 @@ interface ToolbarProps {
   onNoteTool?: (kind: 'todo' | 'prayer' | 'bible' | 'page' | 'calendar' | 'plan') => void;
   /** 휴대폰: 아래쪽 가로 막대, 옆으로 밀어 보기 */
   isPhone?: boolean;
+  /** 낮은 화면(휴대폰 가로): 왼쪽 막대를 위아래 끝까지 쓰고 메뉴는 막대 옆 위에서부터 */
+  isShort?: boolean;
 }
 
 const QUICK_COLORS = [
@@ -68,7 +70,7 @@ const PEN_TOOLS: ToolType[] = ['pen', 'pencil', 'fountain', 'ballpoint', 'dashed
 export const Toolbar: React.FC<ToolbarProps> = ({
   activeTool, onToolSelect, onAddShape, onAddText, color, onColorChange, brushSize, onBrushSizeChange,
   isVertical, onAddFile, onAddWebLink, onUndo, onRedo, onCopy, onPaste, onCut, onOpenWebWindow, onOpenAssets,
-  onStartReview, onOpenStudy, studentMode, onNoteTool, isPhone = false,
+  onStartReview, onOpenStudy, studentMode, onNoteTool, isPhone = false, isShort = false,
 }) => {
   const [menu, setMenu] = useState<string | null>(null);
   const [recentColors, setRecentColors] = useState<string[]>([]);
@@ -203,7 +205,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const penActive = PEN_TOOLS.includes(activeTool);
 
   return (
-    <div className={cn('absolute z-40 pointer-events-none', isVertical ? 'left-4 top-[88px] bottom-[108px] flex flex-col' : isPhone ? 'bottom-[64px] left-2 right-2 flex justify-center' : 'bottom-[96px] left-1/2 -translate-x-1/2')}>
+    <div className={cn('absolute z-[45] pointer-events-none', isVertical ? (isShort ? 'left-2 top-[60px] bottom-2 flex flex-col' : 'left-4 top-[88px] bottom-[108px] flex flex-col') : isPhone ? 'bottom-[64px] left-2 right-2 flex justify-center' : 'bottom-[96px] left-1/2 -translate-x-1/2')}>
       <input
         type="file"
         ref={fileInputRef}
@@ -288,7 +290,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             exit={{ opacity: 0, x: isVertical ? -6 : 0, y: isVertical ? 0 : 6 }}
             className={cn(
               'absolute z-50 p-2 rounded-2xl pointer-events-auto bg-white/95 backdrop-blur-xl ring-1 ring-slate-900/[0.07] shadow-[0_18px_40px_-12px_rgba(15,23,42,0.3)] w-[230px]',
-              isVertical ? 'left-[72px] lg:left-[144px] top-24' : isPhone ? 'bottom-full mb-2 left-1/2 -translate-x-1/2 max-h-[55vh] overflow-y-auto' : 'bottom-full mb-3 left-1/2 -translate-x-1/2',
+              isVertical ? (isShort ? 'left-[68px] top-0 max-h-full overflow-y-auto' : 'left-[72px] lg:left-[144px] top-24 max-h-[calc(100%-6rem)] overflow-y-auto') : isPhone ? 'bottom-full mb-2 left-1/2 -translate-x-1/2 max-h-[55vh] overflow-y-auto' : 'bottom-full mb-3 left-1/2 -translate-x-1/2',
             )}
           >
             <div className="px-2.5 pt-1 pb-1.5 text-[11px] font-semibold text-slate-400">{menus[menu].title}</div>

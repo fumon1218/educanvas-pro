@@ -27,6 +27,8 @@ interface BottomNavBarProps {
   isRecording?: boolean;
   /** 휴대폰: 작게 (확대 비율은 두 손가락으로) */
   isPhone?: boolean;
+  /** 휴대폰 가로: 판서 화면 위에 작게 띄움 */
+  isShort?: boolean;
 }
 
 export const glass = 'bg-white/80 backdrop-blur-xl ring-1 ring-slate-900/[0.06] shadow-[0_8px_30px_-6px_rgba(15,23,42,0.18)]';
@@ -35,7 +37,7 @@ export const glass = 'bg-white/80 backdrop-blur-xl ring-1 ring-slate-900/[0.06] 
 export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   zoomLevel, onResetZoom, onZoomIn, onZoomOut, slides, activeSlideId, onSelectSlide,
   onNextSlide, onPrevSlide, onAddSlide, onOpenSlideNavigator, isCameraOpen = false, onToggleCamera,
-  isVertical = true, onRecord, isRecording = false, isPhone = false,
+  isVertical = true, onRecord, isRecording = false, isPhone = false, isShort = false,
 }) => {
   const idx = Math.max(0, slides.findIndex(s => s.id === activeSlideId));
   const total = slides.length;
@@ -46,7 +48,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   const zoomPercent = Math.round(zoomLevel * 100);
 
   return (
-    <div className={cn('absolute bottom-0 left-0 w-full flex justify-between items-end pointer-events-none z-40', isPhone ? 'gap-1.5 pb-2 px-2' : 'gap-3 pb-4', !isPhone && (isVertical ? 'pl-[92px] pr-4' : 'px-4'))}>
+    <div className={cn('absolute bottom-0 left-0 w-full flex justify-between items-end pointer-events-none z-40', isShort ? 'gap-1.5 pb-3 pl-[80px] pr-3' : isPhone ? 'gap-1.5 pb-2 px-2' : 'gap-3 pb-4', !isPhone && !isShort && (isVertical ? 'pl-[92px] pr-4' : 'px-4'))}>
       {/* 녹화 · 카메라 */}
       <div className={cn('pointer-events-auto flex items-center gap-1 p-1.5 rounded-2xl', glass)}>
         {onRecord && (
