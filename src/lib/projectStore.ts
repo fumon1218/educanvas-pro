@@ -79,13 +79,14 @@ async function withDB<T>(fn: (db: IDBDatabase) => Promise<T>): Promise<T> {
 //  수업마다 따로 칸(lesson:<번호>)에 저장하고, 목록(library-index)에 이름·분류·썸네일을 둔다.
 // ===========================================================================
 
-export type Space = 'lesson' | 'student' | 'sermon' | 'work' | 'iep';
+export type Space = 'lesson' | 'student' | 'sermon' | 'work' | 'iep' | 'culture';
 export const ALL_SPACES: { id: Space; label: string; noun: string }[] = [
   { id: 'lesson', label: '수업', noun: '수업' },
   { id: 'student', label: '학생', noun: '공부 노트' },
   { id: 'sermon', label: '설교', noun: '설교 노트' },
   { id: 'work', label: '업무', noun: '업무 노트' },
   { id: 'iep', label: '개별화교육', noun: '관찰 노트' },
+  { id: 'culture', label: '교양', noun: '교양 노트' },
 ];
 /** 화면에 보이는 공간 (출시판에는 설교 공간이 없다) */
 export const SPACES = LITE ? ALL_SPACES.filter(s => s.id !== 'sermon') : ALL_SPACES;

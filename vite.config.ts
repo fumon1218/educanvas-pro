@@ -44,6 +44,8 @@ export default defineConfig(({ mode }) => {
           navigateFallbackDenylist: lite ? [/^\/__/] : [/^\/__/, /\/lite\//],
           cleanupOutdatedCaches: true,
           runtimeCaching: [
+            // 교양 카드 학습 자료: 한 번 받으면 보관하고, 인터넷이 되면 새 자료로 바꿔 둔다
+            { urlPattern: /\/culture\/study-data\.json$/, handler: 'StaleWhileRevalidate', options: { cacheName: 'culture-data', expiration: { maxEntries: 2 }, cacheableResponse: { statuses: [0, 200] } } },
             { urlPattern: /\/assets\/rhwp_bg-[\w-]+\.wasm$/, handler: 'CacheFirst', options: { cacheName: 'hwp-engine', expiration: { maxEntries: 2 }, cacheableResponse: { statuses: [0, 200] } } },
             // 악기 소리(사운드폰트)와 글꼴은 한 번 받으면 보관
             { urlPattern: /^https:\/\/gleitz\.github\.io\//, handler: 'CacheFirst', options: { cacheName: 'soundfonts', expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 365 }, cacheableResponse: { statuses: [0, 200] } } },
