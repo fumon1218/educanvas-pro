@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2b6f9a">
+<title>개별화교육계획 · 옥쌤보드</title>
+<!-- 옥쌤의 즐거운 교실(fumon1218/oks-class) curriculum/iep.html 에서 가져옴. 저장 키(oks_iep_v1)가 같아 같은 주소(fumon1218.github.io)의 즐거운 교실과 기록을 함께 씀 -->
+<style>
+:root{--ink:#24343f;--soft:#5f6f7a;--line:#d5dde3;--bg:#f3f6f8;--card:#fff;--accent:#2b6f9a;--accent2:#e9f2f8;--warn:#fff4dc;--ok:#e6f4ea;--bad:#fdecea}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;font-size:15px}
+a{color:var(--accent)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 12px;min-height:40px}
+button.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
+button.ghost{background:transparent;border-color:transparent;color:var(--accent);padding:6px 8px;min-height:32px}
+button.del{color:#b3261e}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #f0a020;outline-offset:2px}
+input,select,textarea{border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:#fff;width:100%}
+textarea{min-height:72px;resize:vertical}
+label{font-size:13px;color:var(--soft);display:block;margin:0 0 3px}
+header{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0 auto 0 0}
+header .who{display:flex;gap:6px;align-items:center}
+header select{width:auto;min-width:120px}
+nav.steps{display:flex;gap:6px;overflow-x:auto;padding:8px 16px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:61px;z-index:19}
+nav.steps a{white-space:nowrap;text-decoration:none;padding:6px 10px;border-radius:999px;background:var(--accent2);font-size:14px}
+main{max-width:1180px;margin:0 auto;padding:16px}
+section.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+section.card>h2{font-size:17px;margin:0 0 4px}
+.hint{font-size:13px;color:var(--soft);margin:0 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 12px}
+.grid .wide{grid-column:1/-1}
+table.edit{width:100%;border-collapse:collapse;font-size:14px}
+table.edit th{background:var(--accent2);text-align:left;font-weight:600;padding:6px;border:1px solid var(--line)}
+table.edit td{border:1px solid var(--line);padding:4px;vertical-align:top}
+table.edit td input,table.edit td textarea,table.edit td select{border:0;padding:4px;border-radius:4px}
+table.edit td textarea{min-height:56px}
+.scroll{overflow-x:auto}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:12.5px;background:#fff}
+.chip b{font-weight:600}
+.chip.std{background:#eef6ff;border-color:#c8def2}
+.chip.les{background:#f2f8ec;border-color:#cfe5bd}
+.subj{border:1px solid var(--line);border-radius:12px;margin:14px 0;overflow:hidden}
+.subj>.head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--accent2);padding:10px 12px}
+.subj>.head h3{margin:0;font-size:16px;margin-right:auto}
+.subj>.body{padding:12px}
+.picker{border:1px dashed #b9cbd8;border-radius:10px;padding:10px;margin:8px 0;background:#fafcfd}
+.picker .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.picker .row>*{flex:1 1 140px}
+.stdlist{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+.stdlist label{display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-bottom:1px solid #eef2f5;color:var(--ink);font-size:14px;margin:0;cursor:pointer}
+.stdlist label input{width:auto;margin-top:4px}
+.stdlist .area{background:#f6f8fa;font-size:12.5px;color:var(--soft);padding:4px 8px;font-weight:600}
+.stdlist small{color:var(--soft)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.note{background:var(--warn);border-radius:10px;padding:10px 12px;font-size:13.5px;margin:8px 0}
+.gbtns{display:flex;gap:4px}.gbtn{min-height:36px;min-width:32px;padding:4px 8px;border-radius:8px;font-weight:700}.gbtn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+details.card.opt{padding:0}
+details.card.opt>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:14px 16px}
+details.card.opt>summary::-webkit-details-marker{display:none}
+details.card.opt>summary::before{content:"▸";color:var(--soft);transition:transform .15s}
+details.card.opt[open]>summary::before{transform:rotate(90deg)}
+details.card.opt>summary h2{font-size:16px;margin:0}
+details.card.opt[open]>summary{border-bottom:1px solid var(--line)}
+details.card.opt>*:not(summary){margin-left:16px;margin-right:16px}
+details.card.opt>*:last-child{margin-bottom:16px}
+.opt-tag{font-size:12px;padding:2px 8px;border-radius:999px;background:#eef2f5;color:var(--soft)}
+.opt-tag.on{background:var(--ok);color:#1e6b3a}
+h2.optdiv{font-size:15px;color:var(--soft);margin:22px 4px 8px}
+h2.optdiv small{font-weight:400;margin-left:6px}
+label.chk{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:5px 10px;margin:0;color:var(--ink);font-size:13.5px;background:#fff;cursor:pointer}
+label.chk input{width:auto;margin:0}
+label.chk.off{opacity:.45;cursor:not-allowed}
+.ctag{display:inline-block;font-size:11px;font-weight:700;border-radius:6px;padding:0 5px;margin-right:4px;color:#fff;background:#4a7fa8}
+.ctag.c{background:#c07a2c}
+.meas{display:flex;gap:4px;margin-top:4px}
+.meas input{font-size:12.5px;padding:3px 6px;border:1px dashed #b9cbd8!important;border-radius:6px!important;min-width:0}
+.goalfull{font-size:12.5px;color:#1e5a80;background:#eef6ff;border-radius:6px;padding:3px 6px;margin-top:4px}
+.spark{display:block}
+.spark-none{font-size:12px;color:var(--soft)}
+.stline{font-size:12px;color:var(--soft);margin:2px 0}
+.st{font-weight:700;border-radius:6px;padding:0 5px}
+.st.ok{background:var(--ok);color:#1e6b3a}.st.up{background:#e8f1fb;color:#1e5a80}.st.warn{background:var(--warn);color:#7a5200}.st.none{background:#eef2f5;color:var(--soft)}
+details.supbox{border:1px solid var(--line);border-radius:10px;margin:8px 0;background:#fcfdfe}
+details.supbox>summary{cursor:pointer;padding:9px 12px;font-weight:600}
+details.supbox>summary small{font-weight:400;color:var(--soft)}
+.supbody{padding:4px 12px 12px}
+.suprow{margin:8px 0}.suprow>b{display:block;font-size:13px;margin-bottom:4px}
+.okbox{background:var(--ok);border-radius:10px;padding:10px 12px;font-size:13.5px;margin:8px 0}
+.dates{display:flex;gap:14px;flex-wrap:wrap;font-size:14px}
+.dates b{color:var(--accent)}
+.gr{font-weight:700}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#24343f;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:.25s;pointer-events:none;z-index:50}
+.toast.on{opacity:1}
+dialog{border:0;border-radius:14px;padding:0;max-width:min(980px,96vw);width:96vw}
+dialog::backdrop{background:rgba(20,30,40,.45)}
+dialog .dhead{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff}
+dialog .dhead b{margin-right:auto}
+dialog .dbody{padding:14px;max-height:78vh;overflow:auto}
+.lespick label{display:flex;gap:8px;padding:6px;border-bottom:1px solid #eef2f5;color:var(--ink);font-size:14px;margin:0}
+.lespick label input{width:auto}
+/* 출력용 문서 */
+#doc{display:none}
+.docwrap{font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;color:#000;font-size:10.5pt;line-height:1.45}
+.docwrap h1{font-size:16pt;text-align:center;margin:0 0 8pt}
+.docwrap h2{font-size:12pt;margin:12pt 0 4pt}
+.docwrap h3{font-size:12pt;text-align:center;margin:14pt 0 6pt;letter-spacing:2pt}
+.docwrap table{width:99.6%;border-collapse:collapse;margin:0 0 6pt;page-break-inside:auto}
+.docwrap th,.docwrap td{border:1px solid #000;padding:3pt 5pt;vertical-align:top;font-size:10pt}
+.docwrap th{background:#e8e8e8;font-weight:700;text-align:center;vertical-align:middle}
+.docwrap tr{page-break-inside:avoid}
+.docwrap .box{border:1px solid #000;padding:5pt 7pt;margin:0 0 6pt;white-space:pre-wrap}
+.docwrap .center{text-align:center}
+.docwrap .pb{page-break-before:always}
+.docwrap ul{margin:0;padding-left:14pt}
+.docwrap small{font-size:8.5pt;color:#333}
+#preview .docwrap{background:#fff;padding:18px}
+@media print{
+  @page{size:A4;margin:14mm 12mm}
+  body{background:#fff}
+  header,nav.steps,main,.toast,dialog{display:none!important}
+  #doc{display:block}
+}
+@media (max-width:640px){main{padding:10px}section.card{padding:12px}header{position:static}nav.steps{top:0}}
+</style>
+</head>
+<body>
+<header>
+  <h1>📝 개별화교육계획 작성</h1>
+  <div class="who">
+    <label for="profSel" style="margin:0">학생</label>
+    <select id="profSel"></select>
+  </div>
+  <div class="who">
+    <label for="planSel" style="margin:0">계획</label>
+    <select id="planSel"></select>
+  </div>
+  <button id="newPlan" type="button">＋ 새 계획</button>
+  <button id="prevBtn" class="pri" type="button">👀 미리보기·출력</button>
+  <a href="https://fumon1218.github.io/oks-class/curriculum/plan.html" target="_blank" rel="noopener">📘 지도 계획서</a>
+  <a href="https://fumon1218.github.io/oks-class/learn/" target="_blank" rel="noopener">🌱 배움 지도</a>
+</header>
+<nav class="steps" aria-label="작성 순서">
+  <a href="#s-basic">1 기본 정보</a><a href="#s-subj">2 교과·영역별 계획</a><a href="#s-eval">3 평가</a>
+  <a href="#s-info">인적사항(선택)</a><a href="#s-diag">진단·현재 수준(선택)</a><a href="#s-team">지원팀·관련서비스(선택)</a><a href="#s-beh">행동지원·전환(선택)</a><a href="#s-file">저장·불러오기</a>
+</nav>
+<main id="app"><p>불러오는 중…</p></main>
+<div id="doc"></div>
+<dialog id="preview"><div class="dhead"><b>미리보기</b><button type="button" id="pPrint" class="pri">🖨️ 인쇄·PDF</button><button type="button" id="pWord">📄 한글·Word 파일</button><button type="button" id="pClose">닫기</button></div><div class="dbody"></div></dialog>
+<dialog id="aiDlg"><div class="dhead"><b>🤖 AI 도움으로 평가 쓰기</b><button type="button" id="aiApply" class="pri">평가 칸에 넣기</button><button type="button" id="aiClose">닫기</button></div><div class="dbody"></div></dialog>
+<dialog id="chkDlg"><div class="dhead"><b>📈 진전 점검 기록</b><button type="button" id="chkClose">닫기</button></div><div class="dbody"></div></dialog>
+<dialog id="lesDlg"><div class="dhead"><b>앱 차시 연결</b><button type="button" id="lesOk" class="pri">연결</button><button type="button" id="lesClose">닫기</button></div><div class="dbody"></div></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="lessons.js"></script>
+<script src="standards.js"></script>
+<script src="standards-common.js"></script>
+<script src="standards-activities.js"></script>
+<script src="art-standards.js"></script>
+<script src="iep.js"></script>
+</body>
+</html>

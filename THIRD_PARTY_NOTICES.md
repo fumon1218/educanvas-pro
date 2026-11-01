@@ -66,6 +66,10 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 
 앱에 들어가는 모든 오픈소스 패키지의 라이선스 전문은 앱의 [설정 → 저작권·오픈소스 고지 → 전문 보기](licenses.txt)에서 볼 수 있습니다(빌드할 때 자동으로 모음).
 
+## 개별화교육계획
+
+`public/iep/`의 개별화교육계획 작성 도구는 제작자가 직접 만든 '옥쌤의 즐거운 교실'(oks-class)의 curriculum/iep에서 옮겨 온 것입니다. 성취기준 문장은 교육부 고시 「2022 개정 특수교육 교육과정」·「2022 개정 초·중학교 교육과정」에서 가져왔습니다(고시는 저작권 보호 대상이 아님, 저작권법 제7조).
+
 ## 악보 기능
 
 `src/music/` 폴더의 악보 해석·연주 코드는 제작자가 직접 만든 사보앱(sheet-music-app)에서 옮겨 온 것입니다.

@@ -1,3 +1,4 @@
+import { IepWindow } from './components/UI/IepWindow';
 import * as driveSyncMod from './lib/driveSync';
 import { MonthPickerHost, pickMonth } from './components/UI/MonthPicker';
 import { PlanPalette } from './components/UI/PlanPalette';
@@ -131,6 +132,7 @@ export default function App() {
   /** 집중 모드: 막대를 모두 숨기고 작은 도구 막대만 */
   const [focusMode, setFocusMode] = useState(false);
   const [planPaletteOpen, setPlanPaletteOpen] = useState(true);
+  const [iepOpen, setIepOpen] = useState(false);
   // AI 키가 있는지 (설정에서 넣거나 지우면 바로 반영)
   const [aiReady, setAiReady] = useState(() => !!getAiKey());
   useEffect(() => { const on = () => setAiReady(!!getAiKey()); window.addEventListener('okssam:ai-key', on); return () => window.removeEventListener('okssam:ai-key', on); }, []);
@@ -2242,6 +2244,7 @@ export default function App() {
       <CalendarHost />
       <AddPageHost />
       <MonthPickerHost />
+      <IepWindow open={iepOpen} onClose={() => setIepOpen(false)} />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard
         isOpen={lessonsOpen}
@@ -2260,6 +2263,7 @@ export default function App() {
         saveCurrent={async () => { if (dirtyRef.current) await saveRef.current(false); }}
         onOpen={id => { void openLocalLesson(id); }}
         onNew={o => { void newLesson(o); }}
+        onOpenIep={() => { setLessonsOpen(false); setIepOpen(true); }}
         onAddAsPage={t => { setLessonsOpen(false); if (t.paper) setTimeout(() => { void addPageWith(t.paper, whiteboardRef.current?.hasNotebookPages() ? 'right' : 'down'); }, 250); }}
         onImportFile={() => projectFileInputRef.current?.click()}
         onShowHistory={id => { setHistoryLesson(id); setHistoryOpen(true); }}

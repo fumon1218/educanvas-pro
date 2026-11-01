@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   X, Search, Plus, Star, Folder, FolderPlus, Trash2, Clock, LayoutGrid, Cloud, CloudOff, HardDrive, MoreHorizontal,
   Copy, Pencil, History, RotateCcw, FileUp, Check, Loader2, Tag, ArrowDownAZ, CalendarClock, CalendarDays, ListChecks,
-  HeartHandshake, Lock, LockOpen, FileDown, Presentation, GraduationCap, BookOpen, Briefcase, ChevronLeft, ChevronRight, ArrowRightLeft, BookmarkPlus,
+  HeartHandshake, Lock, LockOpen, FileDown, Presentation, GraduationCap, BookOpen, Briefcase, ChevronLeft, ChevronRight, ArrowRightLeft, BookmarkPlus, ClipboardList,
 } from 'lucide-react';
 import {
   listLibrary, updateLesson, deleteLessonForever, duplicateLesson, renameCategory, setCategories, spaceOf, SPACES,
@@ -19,8 +19,8 @@ type View =
   | { kind: 'all' } | { kind: 'fav' } | { kind: 'recent' } | { kind: 'cat'; name: string } | { kind: 'none' }
   | { kind: 'trash' } | { kind: 'drive' } | { kind: 'calendar' } | { kind: 'checks'; check: 'todo' | 'prayer' };
 
-const SPACE_ICON: Record<Space, React.ElementType> = { lesson: Presentation, student: GraduationCap, sermon: BookOpen, work: Briefcase };
-const SPACE_TINT: Record<Space, string> = { lesson: 'text-indigo-600', student: 'text-emerald-600', sermon: 'text-amber-600', work: 'text-sky-600' };
+const SPACE_ICON: Record<Space, React.ElementType> = { lesson: Presentation, student: GraduationCap, sermon: BookOpen, work: Briefcase, iep: ClipboardList };
+const SPACE_TINT: Record<Space, string> = { lesson: 'text-indigo-600', student: 'text-emerald-600', sermon: 'text-amber-600', work: 'text-sky-600', iep: 'text-teal-600' };
 
 const when = (iso: string) => {
   const d = new Date(iso), s = (Date.now() - d.getTime()) / 1000;
@@ -52,6 +52,8 @@ export interface LessonDashboardProps {
   onNew: (opts: { category?: string; space: Space; template: TemplateDef }) => void;
   /** 이 양식을 새 노트 대신 지금 노트에 쪽으로 더하기 */
   onAddAsPage?: (template: TemplateDef) => void;
+  /** 개별화교육계획 작성 도구 열기 */
+  onOpenIep?: () => void;
   onOpenWrongNote: () => void;
   onImportFile: () => void;
   onShowHistory: (lessonId: string) => void;
@@ -335,6 +337,16 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
               </header>
 
               <div className="flex-1 overflow-y-auto p-3 sm:p-5">
+                {space === 'iep' && !k && view.kind !== 'trash' && view.kind !== 'drive' && props.onOpenIep && (
+                  <div className="mb-4 p-4 rounded-2xl bg-teal-50 ring-1 ring-teal-100 flex flex-wrap items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-white text-teal-600 ring-1 ring-teal-100"><ClipboardList size={22} /></div>
+                    <div className="flex-1 min-w-[200px]">
+                      <div className="text-[15px] font-bold text-slate-800">개별화교육계획(IEP) 작성</div>
+                      <div className="text-[12px] text-slate-600">2022 개정 기본·공통 교육과정 성취기준으로 교과·영역별 목표, 월별 계획, 평가, 지원팀·행동지원·전환까지. 미리보기·인쇄·한글·Word 파일로 내보내기.</div>
+                    </div>
+                    <button onClick={props.onOpenIep} className="h-10 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[14px] font-semibold">작성 도구 열기</button>
+                  </div>
+                )}
                 {!k && view.kind === 'drive' ? (
                   <DrivePane drive={drive} list={driveList} err={driveErr} reload={loadDrive} localIds={localIds} onClose={onClose} />
                 ) : !k && view.kind === 'calendar' ? (

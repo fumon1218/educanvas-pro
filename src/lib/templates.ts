@@ -34,6 +34,8 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'workplan', space: 'work', label: '업무 월간 계획', desc: '이달의 목표·주요 마감, 월요일부터 달력 + 주간 중점, 정기 업무·이월 업무·월말 돌아보기 · 항목 끌어다 놓기', paper: 'workplan', name: d => `${d.getMonth() + 1}월 업무 계획` },
   { id: 'meeting', space: 'work', label: '회의록', desc: '일시·참석자·안건, 논의, 결정 사항, 할 일', paper: 'meeting', name: d => `회의록 · ${md(d)}` },
   { id: 'worklog', space: 'work', label: '업무 일지', desc: '오늘 할 일, 한 일, 내일 할 일, 메모', paper: 'worklog', name: d => `업무 일지 · ${md(d)}` },
+  { id: 'lined', space: 'iep', label: '관찰·상담 기록', desc: '학생 관찰·상담·진전 기록용 줄 공책', paper: 'lined', name: d => `관찰 기록 · ${md(d)}` },
+  { id: 'grid', space: 'iep', label: '모눈 공책', desc: '학습지·자료 만들기', paper: 'grid', name: d => `개별화 자료 · ${md(d)}` },
   { id: 'lined', space: 'work', label: '줄 공책', desc: '자유 메모', paper: 'lined', name: d => `업무 메모 · ${md(d)}` },
 ];
 export const templatesFor = (space: Space) => TEMPLATES.filter(t => t.space === space && !(LITE && t.space === 'sermon'));
