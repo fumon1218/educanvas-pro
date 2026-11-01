@@ -1,3 +1,4 @@
+import * as googleDriveMod from '@/src/lib/googleDrive';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Upload, Trash2, Search, Box, Loader2, Plus, FolderOpen, Cloud, Check, ArrowLeft } from 'lucide-react';
@@ -83,7 +84,7 @@ export const AssetLibrary: React.FC<Props> = ({ isOpen, onClose, onInsert }) => 
   const openDrive = async (force = false) => {
     setDriveBusy('구글 드라이브에 연결하는 중…');
     try {
-      const { getDriveToken, listGlbFiles } = await import('@/src/lib/googleDrive');
+      const { getDriveToken, listGlbFiles } = googleDriveMod;
       const token = await getDriveToken(force);
       setDriveBusy('GLB 파일을 찾는 중…');
       const files = await listGlbFiles(token);
@@ -100,7 +101,7 @@ export const AssetLibrary: React.FC<Props> = ({ isOpen, onClose, onInsert }) => 
 
   const importFromDrive = async () => {
     if (!drive || !picked.size) return;
-    const { downloadDriveFile, getDriveToken } = await import('@/src/lib/googleDrive');
+    const { downloadDriveFile, getDriveToken } = googleDriveMod;
     const list = drive.files.filter(f => picked.has(f.id));
     let ok = 0;
     for (let i = 0; i < list.length; i++) {

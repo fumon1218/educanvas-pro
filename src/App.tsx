@@ -1,3 +1,4 @@
+import * as driveSyncMod from './lib/driveSync';
 import { MonthPickerHost, pickMonth } from './components/UI/MonthPicker';
 import { PlanPalette } from './components/UI/PlanPalette';
 import { AddPageHost, pickPage } from './components/UI/AddPagePicker';
@@ -640,7 +641,8 @@ export default function App() {
   const driveBusyRef = useRef(false);
 
   const driveTokenOrNull = useCallback(async (interactive: boolean) => {
-    const { cachedToken, connectDrive } = await import('./lib/driveSync');
+    // 팝업은 누른 순간 바로 열어야 아이폰 Safari가 막지 않는다 → 미리 불러 둔 모듈을 씀 (await 없이)
+    const { cachedToken, connectDrive } = driveSyncMod;
     const t = cachedToken();
     if (t) return t;
     if (!interactive) { setDriveState('need-auth'); return null; }
@@ -658,7 +660,7 @@ export default function App() {
     setDriveState('saving');
     const id = opts.manual ? toast.loading('구글 드라이브에 저장하는 중…') : undefined;
     try {
-      const sync = await import('./lib/driveSync');
+      const sync = driveSyncMod;
       const proj = buildProject();
       const cur = lessonRef.current;
       // 다른 기기에서 더 최근에 고쳤는지 확인
@@ -706,7 +708,7 @@ export default function App() {
     if (dirtyRef.current) await saveRef.current(false);
     const id = toast.loading(`'${l.name}'을(를) 여는 중…`);
     try {
-      const sync = await import('./lib/driveSync');
+      const sync = driveSyncMod;
       const p = await sync.loadLesson(token, l.id);
       if (!isValidProject(p)) throw new Error('옥쌤보드 수업 파일이 아닙니다.');
       const got = await sync.downloadMissingModels(token, sync.modelIdsOf(p)).catch(() => 0);
@@ -725,7 +727,7 @@ export default function App() {
 
   const enableDrive = useCallback(async () => {
     if (TEST_MODE) { toast.error('시험 모드에서는 구글 드라이브를 쓰지 않습니다.', { description: '실제 수업을 보호하기 위해서입니다. 주소에서 ?test=1을 빼고 새 탭으로 여세요.' }); return false; }
-    const { connectDrive } = await import('./lib/driveSync');
+    const { connectDrive } = driveSyncMod;
     try {
       await connectDrive();
       try { localStorage.setItem('okssam_drive_sync', '1'); } catch { /* 무시 */ }
@@ -833,7 +835,7 @@ export default function App() {
   const listDriveLessons = useCallback(async () => {
     const token = await driveTokenOrNull(true);
     if (!token) throw new Error('구글 드라이브에 연결해 주세요.');
-    const { listLessons } = await import('./lib/driveSync');
+    const { listLessons } = driveSyncMod;
     return listLessons(token);
   }, [driveTokenOrNull]);
 
