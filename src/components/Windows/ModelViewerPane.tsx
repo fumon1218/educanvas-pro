@@ -1,3 +1,4 @@
+import * as googleDriveMod from '@/src/lib/googleDrive';
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -266,7 +267,7 @@ export const ModelViewerPane: React.FC<Props> = ({ modelId, driveId, modelName, 
     if (!driveId) return;
     setFetching(true);
     try {
-      const { getDriveToken, downloadDriveFile } = await import('@/src/lib/googleDrive');
+      const { getDriveToken, downloadDriveFile } = googleDriveMod;
       const { importModelBlob } = await import('./AssetLibrary');
       const token = await getDriveToken();
       const blob = await downloadDriveFile(token, driveId);
