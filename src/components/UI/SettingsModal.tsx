@@ -1,3 +1,4 @@
+import { getUserAiKey, looksLikeKey, setUserAiKey } from '@/src/lib/aiKey';
 import NOTICES from '@/THIRD_PARTY_NOTICES.md?raw';
 import React, { useState } from 'react';
 import { getPenSettings, setPenSettings, type PenSettings } from '@/src/lib/pen';
@@ -93,6 +94,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             <PenSection />
 
+            <AiKeySection />
+
             <details className="group rounded-xl border border-gray-100 px-3 py-2">
               <summary className="cursor-pointer text-sm font-semibold text-gray-700">저작권·오픈소스 고지</summary>
               <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-gray-600">{NOTICES}</pre>
@@ -126,6 +129,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
     )}
   </AnimatePresence>
+  );
+};
+
+/** AI 기능: 각자 자기 Gemini 키를 넣는다 (이 기기에만 저장) */
+const AiKeySection: React.FC = () => {
+  const [saved, setSaved] = useState(getUserAiKey);
+  const [v, setV] = useState('');
+  const [err, setErr] = useState('');
+  const save = () => {
+    if (!looksLikeKey(v)) { setErr('키 모양이 맞지 않습니다. AIza로 시작하는 키를 그대로 붙여 넣어 주세요.'); return; }
+    setUserAiKey(v); setSaved(v.trim()); setV(''); setErr('');
+  };
+  const masked = saved ? `${saved.slice(0, 6)}••••••${saved.slice(-4)}` : '';
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-semibold text-gray-700">AI 기능 (Gemini 키)</div>
+      <p className="text-xs text-gray-500 leading-relaxed">
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-indigo-600 font-semibold hover:underline">Google AI Studio</a>에서
+        [API 키 만들기]로 만든 키를 붙여 넣으세요. 결제를 등록하지 않으면 무료 사용량 안에서만 쓰이고 요금이 나오지 않습니다.
+        키는 이 기기에만 저장되고, AI에게 물을 때 Google에만 보냅니다.
+      </p>
+      {saved ? (
+        <div className="flex items-center gap-2">
+          <span className="flex-1 h-9 px-3 flex items-center rounded-lg bg-emerald-50 text-emerald-700 text-[13px] font-mono">✓ {masked}</span>
+          <button onClick={() => { setUserAiKey(''); setSaved(''); }} className="h-9 px-3 rounded-lg text-[13px] text-red-600 hover:bg-red-50">키 지우기</button>
+        </div>
+      ) : (
+        <form onSubmit={e => { e.preventDefault(); save(); }} className="flex items-center gap-2">
+          <input value={v} onChange={e => { setV(e.target.value); setErr(''); }} type="password" autoComplete="off" spellCheck={false} placeholder="AIza…" aria-label="Gemini API 키"
+            className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-gray-100 text-[13px] font-mono outline-none focus:bg-white focus:ring-2 focus:ring-indigo-300" />
+          <button type="submit" disabled={!v.trim()} className="h-9 px-3.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-[13px] font-semibold">저장</button>
+        </form>
+      )}
+      {err && <p className="text-xs text-red-600">{err}</p>}
+    </div>
   );
 };
 
