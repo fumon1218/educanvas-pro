@@ -14,7 +14,10 @@ import type { Space } from './projectStore';
 import { LITE } from './edition';
 import { holidaysOf } from './calendar';
 
-export type PaperStyle = 'lined' | 'grid' | 'blank' | 'cornell' | 'sermon' | 'meeting' | 'worklog' | 'planner' | 'churchplan';
+export type PaperStyle = 'lined' | 'grid' | 'blank' | 'cornell' | 'sermon' | 'meeting' | 'worklog' | 'planner' | 'churchplan' | 'workplan';
+/** 달(planMonth)이 들어가는 계획 종이 */
+export const MONTH_PAPERS: PaperStyle[] = ['churchplan', 'workplan'];
+export const isMonthPaper = (s?: string) => !!s && (MONTH_PAPERS as string[]).includes(s);
 export interface TemplateDef { id: string; space: Space; label: string; desc: string; paper?: PaperStyle; name: (d: Date) => string }
 
 const md = (d: Date) => `${d.getMonth() + 1}월 ${d.getDate()}일`;
@@ -28,6 +31,7 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'sermon', space: 'sermon', label: '설교 노트', desc: '날짜·설교자·예배·본문·제목 칸 + 자유롭게 쓰는 줄 공간', paper: 'sermon', name: d => `설교 노트 · ${md(d)}` },
   { id: 'churchplan', space: 'sermon', label: '교회 계획 (월간)', desc: '이번 달 달력(공휴일 표시) + 칸마다 적는 곳 · 항목을 끌어다 놓기', paper: 'churchplan', name: d => `${d.getMonth() + 1}월 교회 계획` },
   { id: 'lined', space: 'sermon', label: '줄 공책', desc: '자유 묵상·성경 공부', paper: 'lined', name: d => `묵상 노트 · ${md(d)}` },
+  { id: 'workplan', space: 'work', label: '업무 월간 계획', desc: '이달의 목표·주요 마감, 월요일부터 달력 + 주간 중점, 정기 업무·이월 업무·월말 돌아보기 · 항목 끌어다 놓기', paper: 'workplan', name: d => `${d.getMonth() + 1}월 업무 계획` },
   { id: 'meeting', space: 'work', label: '회의록', desc: '일시·참석자·안건, 논의, 결정 사항, 할 일', paper: 'meeting', name: d => `회의록 · ${md(d)}` },
   { id: 'worklog', space: 'work', label: '업무 일지', desc: '오늘 할 일, 한 일, 내일 할 일, 메모', paper: 'worklog', name: d => `업무 일지 · ${md(d)}` },
   { id: 'lined', space: 'work', label: '줄 공책', desc: '자유 메모', paper: 'lined', name: d => `업무 메모 · ${md(d)}` },
@@ -78,6 +82,7 @@ function layoutOf(style: PaperStyle, first: boolean, ctx: { date?: Date; holiday
   const W = PAPER_W - M * 2;
   switch (style) {
     case 'churchplan': return churchPlanLayout(ctx.date || new Date(), ctx.holidays || {});
+    case 'workplan': return workPlanLayout(ctx.date || new Date(), ctx.holidays || {});
     case 'lined': return { draw: c => { line(c, M + 70, 60, M + 70, PAPER_H - 60, '#fca5a5', 2); ruled(c, 0, 80, PAPER_W, PAPER_H - 60, 64); }, fields: [] };
     case 'grid': return { draw: c => { for (let x = 40; x < PAPER_W; x += 40) line(c, x, 40, x, PAPER_H - 40, '#e2e8f0', 1.5); for (let y = 40; y < PAPER_H; y += 40) line(c, 40, y, PAPER_W - 40, y, '#e2e8f0', 1.5); }, fields: [] };
     case 'blank': return { draw: () => {}, fields: [] };
@@ -215,13 +220,21 @@ const dkey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStar
 
 export interface PlanCell { x: number; y: number; w: number; h: number; date: Date; inMonth: boolean }
 /** 교회 계획 종이의 날짜 칸 (종이 좌표, 1240×1754) */
-export function churchPlanCells(date: Date): PlanCell[] {
+export function churchPlanCells(date: Date): PlanCell[] { return monthCells(date, CP.x0, CP.x1, CP.head + CP.headH, CP.gridBottom, false); }
+
+/** 계획 종이 종류별 날짜 칸 */
+export function planCells(kind: string, date: Date): PlanCell[] {
+  return kind === 'workplan' ? monthCells(date, WP.x0, WP.x0 + WP.dayW * 7, WP.head + WP.headH, WP.gridBottom, true) : churchPlanCells(date);
+}
+
+function monthCells(date: Date, x0: number, x1: number, top: number, bottom: number, mondayFirst: boolean): PlanCell[] {
   const y = date.getFullYear(), m = date.getMonth();
   const first = new Date(y, m, 1);
-  const lead = first.getDay();
+  const lead = mondayFirst ? (first.getDay() + 6) % 7 : first.getDay();
   const days = new Date(y, m + 1, 0).getDate();
   const rows = Math.ceil((lead + days) / 7);
-  const cw = (CP.x1 - CP.x0) / 7, top = CP.head + CP.headH, rh = (CP.gridBottom - top) / rows;
+  const cw = (x1 - x0) / 7, rh = (bottom - top) / rows;
+  const CP = { x0 };
   const out: PlanCell[] = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < 7; c++) {
     const d = new Date(y, m, 1 - lead + r * 7 + c);
@@ -309,11 +322,98 @@ function churchPlanLayout(date: Date, holidays: Record<string, string>): Layout 
   };
 }
 
+// ---------------------------------------------------------------------------
+// 업무 월간 계획: 목표·마감 → 달력(월요일부터) + 주간 중점 → 정기·이월 업무, 메모, 월말 돌아보기
+// (월간 플래너 구성: 목표 2~5개, 마감·일정, 주간 우선순위, 반복 업무, 이월 업무, 월말 점검)
+// ---------------------------------------------------------------------------
+
+const WP = { x0: 70, dayW: 128, weekW: 204, top: 228, topBottom: 420, head: 440, headH: 48, gridBottom: 1380, foot: 1400, footBottom: 1700 };
+const WD_KO_MON = ['월', '화', '수', '목', '금', '토', '일'];
+
+function workPlanLayout(date: Date, holidays: Record<string, string>): Layout {
+  const y = date.getFullYear(), m = date.getMonth();
+  const x1 = WP.x0 + WP.dayW * 7 + WP.weekW;
+  const cells = planCells('workplan', date);
+  const rows = cells.length / 7;
+  const rh = (WP.gridBottom - WP.head - WP.headH) / rows;
+  const goalW = (x1 - WP.x0) * 0.58;
+  const foot = [
+    { t: '정기 업무 (매주·매월 반복)', w: 0.26 },
+    { t: '이월 업무 (지난달 남은 일)', w: 0.26 },
+    { t: '메모', w: 0.22 },
+    { t: '월말 돌아보기', w: 0.26 },
+  ];
+  const footX = foot.map((_, i) => WP.x0 + foot.slice(0, i).reduce((a, f) => a + f.w, 0) * (x1 - WP.x0));
+  return {
+    draw: c => {
+      // 머리
+      c.fillStyle = '#0f766e'; c.font = `italic bold 112px Georgia, 'Times New Roman', serif`; c.textBaseline = 'alphabetic';
+      c.fillText(String(m + 1), WP.x0 + 6, 180);
+      const nw = c.measureText(String(m + 1)).width;
+      c.fillStyle = '#1e293b'; c.font = `bold 32px Georgia, 'Times New Roman', serif`;
+      c.fillText(String(y), WP.x0 + 22 + nw, 132); c.fillText(EN_MONTH[m], WP.x0 + 22 + nw, 174);
+      const bx = 520, by = 70, bw = 450, bh = 110;
+      c.fillStyle = '#ccfbf1'; c.fillRect(bx, by, bw, bh);
+      c.strokeStyle = '#0f766e'; c.lineWidth = 2; c.strokeRect(bx, by, bw, bh);
+      c.fillStyle = '#134e4a'; c.font = `bold 46px ${KFONT}`; c.textBaseline = 'middle'; c.textAlign = 'center';
+      c.fillText(`${m + 1}월 업무 계획`, bx + bw / 2, by + bh / 2);
+      c.textAlign = 'left';
+      label(c, '부서·이름', 990, 86, 18, '#64748b');
+      line(c, 990, 170, x1, 170, '#cbd5e1', 1.5);
+      // 이달의 목표 · 주요 마감
+      box(c, WP.x0, WP.top, goalW - 10, WP.topBottom - WP.top);
+      label(c, '이달의 목표 (측정할 수 있게 3가지)', WP.x0 + 16, WP.top + 12, 22, '#0f766e');
+      ['1', '2', '3'].forEach((n, i) => { const yy = WP.top + 64 + i * 46; label(c, n, WP.x0 + 18, yy, 22, '#94a3b8'); line(c, WP.x0 + 44, yy + 32, WP.x0 + goalW - 26, yy + 32, '#e2e8f0', 2); });
+      box(c, WP.x0 + goalW + 10, WP.top, x1 - WP.x0 - goalW - 10, WP.topBottom - WP.top);
+      label(c, '주요 마감 · 보고 (날짜)', WP.x0 + goalW + 26, WP.top + 12, 22, '#b91c1c');
+      ruled(c, WP.x0 + goalW + 22, WP.top + 40, x1 - 12, WP.topBottom - 6, 46);
+      // 요일 줄 (월요일부터) + 주간 중점
+      c.fillStyle = '#e2e8f0'; c.fillRect(WP.x0, WP.head, x1 - WP.x0, WP.headH);
+      WD_KO_MON.forEach((t, i) => {
+        c.fillStyle = i === 6 ? '#dc2626' : i === 5 ? '#1d4ed8' : '#1e293b';
+        c.font = `bold 26px ${KFONT}`; c.textBaseline = 'middle'; c.textAlign = 'center';
+        c.fillText(t, WP.x0 + WP.dayW * i + WP.dayW / 2, WP.head + WP.headH / 2 + 1);
+      });
+      c.fillStyle = '#0f766e'; c.fillText('주간 중점', WP.x0 + WP.dayW * 7 + WP.weekW / 2, WP.head + WP.headH / 2 + 1);
+      c.textAlign = 'left';
+      // 날짜 칸
+      for (const cell of cells) {
+        const dow = cell.date.getDay();
+        const hol = holidays[dkey(cell.date)];
+        if (!cell.inMonth) { c.fillStyle = '#f8fafc'; c.fillRect(cell.x, cell.y, cell.w, cell.h); }
+        else if (dow === 0 || dow === 6 || hol) { c.fillStyle = '#fafafa'; c.fillRect(cell.x, cell.y, cell.w, cell.h); }
+        const col = !cell.inMonth ? '#cbd5e1' : (dow === 0 || hol) ? '#dc2626' : dow === 6 ? '#1d4ed8' : '#1e293b';
+        label(c, String(cell.date.getDate()), cell.x + 8, cell.y + 6, 28, col, true);
+        if (hol && cell.inMonth) label(c, hol.length > 6 ? hol.slice(0, 6) + '…' : hol, cell.x + 8, cell.y + 40, 15, '#dc2626');
+      }
+      for (let r = 0; r < rows; r++) { c.fillStyle = '#f0fdfa'; c.fillRect(WP.x0 + WP.dayW * 7, WP.head + WP.headH + r * rh, WP.weekW, rh); }
+      c.strokeStyle = '#64748b'; c.lineWidth = 1.5;
+      c.beginPath();
+      for (let r = 0; r <= rows; r++) { c.moveTo(WP.x0, WP.head + WP.headH + r * rh); c.lineTo(x1, WP.head + WP.headH + r * rh); }
+      for (let i = 0; i <= 8; i++) { const xx = i < 8 ? WP.x0 + WP.dayW * i : x1; c.moveTo(xx, WP.head); c.lineTo(xx, WP.gridBottom); }
+      c.moveTo(WP.x0, WP.head); c.lineTo(x1, WP.head);
+      c.stroke();
+      line(c, WP.x0 + WP.dayW * 7, WP.head, WP.x0 + WP.dayW * 7, WP.gridBottom, '#0f766e', 3);
+      // 아래 칸
+      c.strokeStyle = '#64748b'; c.lineWidth = 1.5; c.strokeRect(WP.x0, WP.foot, x1 - WP.x0, WP.footBottom - WP.foot);
+      footX.forEach((x, i) => { if (i) line(c, x, WP.foot, x, WP.footBottom, '#64748b', 1.5); label(c, foot[i].t, x + 12, WP.foot + 12, 19, i === 3 ? '#0f766e' : '#1e293b'); });
+    },
+    fields: [
+      { key: 'dept', label: '부서·이름', x: 990, y: 112, w: x1 - 1000, h: 50, ph: '', size: 26 },
+      ...[0, 1, 2].map(i => ({ key: `goal-${i + 1}`, label: `목표 ${i + 1}`, x: WP.x0 + 46, y: WP.top + 66 + i * 46, w: goalW - 80, h: 34, ph: '', size: 24 })),
+      { key: 'deadlines', label: '주요 마감', x: WP.x0 + goalW + 26, y: WP.top + 48, w: x1 - WP.x0 - goalW - 44, h: WP.topBottom - WP.top - 56, ph: '', size: 22, checklist: 'todo' as const },
+      ...cells.map(cell => ({ key: `d-${dkey(cell.date)}`, label: `${cell.date.getMonth() + 1}/${cell.date.getDate()}`, x: cell.x + 6, y: cell.y + 58, w: cell.w - 12, h: cell.h - 64, ph: '', size: 18 })),
+      ...Array.from({ length: rows }, (_, r) => ({ key: `week-${r + 1}`, label: `${r + 1}주 중점`, x: WP.x0 + WP.dayW * 7 + 10, y: WP.head + WP.headH + r * rh + 10, w: WP.weekW - 20, h: rh - 20, ph: '', size: 20, checklist: 'todo' as const })),
+      ...foot.map((f, i) => ({ key: `foot-${i}`, label: f.t, x: footX[i] + 10, y: WP.foot + 44, w: f.w * (x1 - WP.x0) - 20, h: WP.footBottom - WP.foot - 54, ph: '', size: 20, ...(i < 2 ? { checklist: 'todo' as const } : {}) })),
+    ],
+  };
+}
+
 const paperCache = new Map<string, string>();
 /** 종이 그림 (data URL) */
 export function paperImage(style: PaperStyle, first: boolean, ctx: { date?: Date; holidays?: Record<string, string> } = {}): string {
   const d = ctx.date || new Date();
-  const k = style === 'churchplan' ? `${style}|${d.getFullYear()}-${d.getMonth()}|${Object.keys(ctx.holidays || {}).length}` : `${style}|${first}`;
+  const k = isMonthPaper(style) ? `${style}|${d.getFullYear()}-${d.getMonth()}|${Object.keys(ctx.holidays || {}).length}` : `${style}|${first}`;
   const hit = paperCache.get(k);
   if (hit) return hit;
   const c = document.createElement('canvas');
@@ -342,7 +442,7 @@ export function makeChecklist(kind: 'todo' | 'prayer', left: number, top: number
 
 /** 쪽 하나(종이 + 칸들)를 캔버스에 놓는다 */
 async function addPaper(sc: fabric.StaticCanvas | fabric.Canvas, style: PaperStyle, first: boolean, pageNo: number, left: number, top: number, pageW: number, date: Date) {
-  const lctx = style === 'churchplan' ? { date, holidays: await holidaysOf(date.getFullYear()).catch(() => ({})) } : {};
+  const lctx = isMonthPaper(style) ? { date, holidays: await holidaysOf(date.getFullYear()).catch(() => ({})) } : {};
   const img = await fabric.FabricImage.fromURL(paperImage(style, first, lctx));
   const k = pageW / PAPER_W;
   img.scale(k);
@@ -351,7 +451,7 @@ async function addPaper(sc: fabric.StaticCanvas | fabric.Canvas, style: PaperSty
     lockMovementX: true, lockMovementY: true, lockRotation: true, lockScalingX: true, lockScalingY: true,
     shadow: new fabric.Shadow({ color: 'rgba(15,23,42,0.18)', blur: 20, offsetX: 0, offsetY: 5 }),
   });
-  Object.assign(img as any, { id: newId(), locked: true, isBackground: true, pageNo, notebook: style, ...(style === 'churchplan' ? { planMonth: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` } : {}) });
+  Object.assign(img as any, { id: newId(), locked: true, isBackground: true, pageNo, notebook: style, ...(isMonthPaper(style) ? { planMonth: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` } : {}) });
   sc.add(img);
   for (const f of layoutOf(style, first, lctx).fields) {
     const fs = Math.round((f.size || 30) * k * 10) / 10;
@@ -395,6 +495,7 @@ export const PAPER_CHOICES: { style: PaperStyle; label: string; lite?: false }[]
   { style: 'worklog', label: '업무 일지' },
   { style: 'sermon', label: '설교 노트', lite: false },
   { style: 'churchplan', label: '교회 계획 (월간)', lite: false },
+  { style: 'workplan', label: '업무 월간 계획' },
 ];
 export const paperChoices = () => PAPER_CHOICES.filter(c => !(LITE && c.lite === false));
 
@@ -419,12 +520,12 @@ export async function appendPaper(canvas: fabric.Canvas, opts: AddPageOpts = {})
   let style: PaperStyle;
   let first: boolean;
   if (opts.style) { style = opts.style; first = true; }
-  else if (ref) { style = ref.notebook === 'sermon' || ref.notebook === 'meeting' || ref.notebook === 'worklog' ? 'lined' : ref.notebook; first = ref.notebook === 'churchplan'; }
+  else if (ref) { style = ref.notebook === 'sermon' || ref.notebook === 'meeting' || ref.notebook === 'worklog' ? 'lined' : ref.notebook; first = isMonthPaper(ref.notebook); }
   else return null;
   // 교회 계획은 다음 달로 (가장 늦은 달 다음)
   let date = opts.date || new Date();
-  if (style === 'churchplan' && !opts.date) {
-    const months = pages.map(p => p.planMonth).filter(Boolean).sort();
+  if (isMonthPaper(style) && !opts.date) {
+    const months = pages.filter(p => p.notebook === style).map(p => p.planMonth).filter(Boolean).sort();
     if (months.length) { const [yy, mm] = months[months.length - 1].split('-').map(Number); date = new Date(yy, mm, 1); }
   }
   let pageW: number, left: number, top: number;
