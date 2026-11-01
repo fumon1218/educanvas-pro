@@ -1,4 +1,4 @@
-/* 개별화교육계획 작성 도구 (curriculum/iep.html)
+/* 개별화교육계획 작성 도구 (curriculum/iep.html) — 옥쌤보드용 사본: 맨 끝 OKS_IEP.exportPlan 만 더함
    - 서식: 특수교육법 제22조·시행규칙 제4조의 필수 내용(인적사항, 현재 학습수행수준, 교육목표, 교육내용, 교육방법, 평가계획,
      특수교육 관련서비스) + 학교 현장 서식(학기별 교과 교육계획 월별 표, 가·나·다·라 평가) + 개별화교육지원팀·행동지원·전환교육.
    - 성취기준: curriculum/standards.js (2022 개정 특수교육 기본 교육과정 [별책 3], 2026.1.21. 일부개정 포함)
@@ -1003,5 +1003,7 @@
   drawHead();
   var start = store.plans.filter(function (p) { return p.id === last.plan; })[0];
   if (start) { curProfile = start.profile || ''; choosePlan(start.id); } else pickProfile(curProfile);
-  window.OKS_IEP = { toGoal: toGoal, toQuestion: toQuestion, docHtml: function () { return cur && docHtml(cur); } };
+  window.OKS_IEP = { toGoal: toGoal, toQuestion: toQuestion, docHtml: function () { return cur && docHtml(cur); },
+    /* 옥쌤보드: 지금 계획을 슬라이드로 보내기 (계획서 HTML과 파일 이름) */
+    exportPlan: function () { if (!cur) return null; persistNow(); return { html: docHtml(cur), name: fileBase() }; } };
 })();

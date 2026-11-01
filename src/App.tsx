@@ -142,6 +142,29 @@ export default function App() {
   const [focusMode, setFocusMode] = useState(false);
   const [planPaletteOpen, setPlanPaletteOpen] = useState(true);
   const [iepOpen, setIepOpen] = useState(false);
+  /** 개별화교육계획 → 새 노트(개별화교육 공간, 쪽마다 그림). 학생 정보가 있어 드라이브에는 올리지 않음 */
+  const iepToSlides = async (frame: HTMLIFrameElement) => {
+    const id = toast.loading('계획서를 쪽 그림으로 바꾸는 중…');
+    try {
+      const { iepToPages } = await import('./lib/iepExport');
+      const r = await iepToPages(frame, s => toast.loading(s, { id }));
+      if (!r) { toast.error('먼저 계획을 만들거나 골라 주세요.', { id }); return; }
+      if (dirtyRef.current) await saveRef.current(false);
+      const w = whiteboardRef.current?.getCanvas()?.width || window.innerWidth;
+      const data = await createStackedPdfScene(r.pages, 1, w, null);
+      const now = new Date();
+      const first: Scene = { id: newId(), name: '계획서', data, order: 0 };
+      applyProject({ format: 'educanvas-project', version: 1, name: r.name.replace(/_/g, ' '), savedAt: now.toISOString(), activeSceneId: first.id, canvasBackground: 'blank', scenes: [{ id: first.id, name: first.name, data }] }, { publish: true });
+      lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null, space: 'iep', noteDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}` };
+      markDirty();
+      setIepOpen(false);
+      setTimeout(() => whiteboardRef.current?.goToPageNo(1), 400);
+      toast.success(`계획서 ${r.pages.length}쪽을 새 노트로 만들었습니다.`, { id, description: '[내 노트 → 개별화교육]에 저장됩니다. 학생 정보가 있어 구글 드라이브에는 올리지 않습니다.', duration: 8000 });
+    } catch (e: any) {
+      console.error(e);
+      toast.error('슬라이드로 만들지 못했습니다.', { id, description: e?.message });
+    }
+  };
   // AI 키가 있는지 (설정에서 넣거나 지우면 바로 반영)
   const [aiReady, setAiReady] = useState(() => !!getAiKey());
   useEffect(() => { const on = () => setAiReady(!!getAiKey()); window.addEventListener('okssam:ai-key', on); return () => window.removeEventListener('okssam:ai-key', on); }, []);
@@ -665,6 +688,7 @@ export default function App() {
   const saveToDrive = useCallback(async (opts: { manual?: boolean; force?: boolean } = {}) => {
     if (!driveOnRef.current || driveBusyRef.current) return;
     if (isUnlocked(lessonRef.current.lessonId)) { if (opts.manual) toast.info('암호로 잠근 노트는 구글 드라이브에 올리지 않습니다.'); return; }
+    if (lessonRef.current.space === 'iep') { if (opts.manual) toast.info('개별화교육 노트는 학생 정보 보호를 위해 구글 드라이브에 올리지 않습니다.'); return; }
     const token = await driveTokenOrNull(!!opts.manual);
     if (!token) return;
     driveBusyRef.current = true;
@@ -2255,7 +2279,7 @@ export default function App() {
       <CalendarHost />
       <AddPageHost />
       <MonthPickerHost />
-      <IepWindow open={iepOpen} onClose={() => setIepOpen(false)} />
+      <IepWindow open={iepOpen} onClose={() => setIepOpen(false)} onToSlides={iepToSlides} />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard
         isOpen={lessonsOpen}
