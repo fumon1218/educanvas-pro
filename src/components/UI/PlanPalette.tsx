@@ -39,17 +39,42 @@ const DEFAULT_ITEMS: PlanItem[] = [
   { text: '대집회', kind: 'banner', color: BANNER },
   { text: '소집회 19:30~', kind: 'banner', color: BANNER },
 ];
-const KEY = 'okssam_plan_items';
-const load = (): PlanItem[] => { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); return Array.isArray(v) && v.length ? v : DEFAULT_ITEMS; } catch { return DEFAULT_ITEMS; } };
-const save = (v: PlanItem[]) => { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch { /* 무시 */ } };
+/** 업무 월간 계획 기본 항목 (학교·기관 업무에서 자주 쓰는 일정) */
+const WORK_ITEMS: PlanItem[] = [
+  { text: '회의', kind: 'chip', color: '#0f172a' },
+  { text: '보고', kind: 'chip', color: '#be123c' },
+  { text: '결재', kind: 'chip', color: '#be123c' },
+  { text: '마감', kind: 'chip', color: '#be123c' },
+  { text: '공문 발송', kind: 'chip', color: '#1e3a8a' },
+  { text: '출장', kind: 'chip', color: '#1e3a8a' },
+  { text: '외근', kind: 'chip', color: '#1e3a8a' },
+  { text: '연수', kind: 'chip', color: '#047857' },
+  { text: '교육', kind: 'chip', color: '#047857' },
+  { text: '행사', kind: 'chip', color: '#047857' },
+  { text: '점검', kind: 'chip', color: '#0f172a' },
+  { text: '예산·회계', kind: 'chip', color: '#0f172a' },
+  { text: '면담', kind: 'chip', color: '#0f172a' },
+  { text: '당직', kind: 'chip', color: '#0f172a' },
+  { text: '휴가', kind: 'chip', color: '#047857' },
+  { text: '출장 기간', kind: 'banner', color: '#bfdbfe' },
+  { text: '행사 기간', kind: 'banner', color: BANNER },
+  { text: '연수 기간', kind: 'banner', color: '#fde68a' },
+];
+const defaultsOf = (kind: string) => (kind === 'workplan' ? WORK_ITEMS : DEFAULT_ITEMS);
+const keyOf = (kind: string) => (kind === 'workplan' ? 'okssam_plan_items_work' : 'okssam_plan_items');
+const load = (kind: string): PlanItem[] => { try { const v = JSON.parse(localStorage.getItem(keyOf(kind)) || 'null'); return Array.isArray(v) && v.length ? v : defaultsOf(kind); } catch { return defaultsOf(kind); } };
 
 export const PlanPalette: React.FC<{
+  /** 'churchplan' | 'workplan' — 항목 목록을 따로 둔다 */
+  kind?: string;
   onDrop: (clientX: number, clientY: number, item: PlanItem) => boolean;
   onDropCenter: (item: PlanItem) => void;
   onClose: () => void;
   className?: string;
-}> = ({ onDrop, onDropCenter, onClose, className }) => {
-  const [items, setItems] = useState<PlanItem[]>(load);
+}> = ({ kind = 'churchplan', onDrop, onDropCenter, onClose, className }) => {
+  const [items, setItems] = useState<PlanItem[]>(() => load(kind));
+  const save = (v: PlanItem[]) => { try { localStorage.setItem(keyOf(kind), JSON.stringify(v)); } catch { /* 무시 */ } };
+  const DEFAULTS = defaultsOf(kind);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [draftColor, setDraftColor] = useState(COLORS[0].c);
@@ -108,7 +133,7 @@ export const PlanPalette: React.FC<{
       <div className={cn('absolute z-40 w-[214px] max-h-[calc(100%-260px)] flex flex-col rounded-2xl bg-white/95 backdrop-blur-xl ring-1 ring-slate-900/[0.07] shadow-[0_10px_30px_-10px_rgba(15,23,42,0.3)]', className)}
         role="toolbar" aria-label="교회 계획 항목">
         <div className="flex items-center gap-1 px-3 pt-2.5 pb-1.5">
-          <span className="flex-1 text-[13px] font-bold text-slate-700">계획 항목</span>
+          <span className="flex-1 text-[13px] font-bold text-slate-700">{kind === 'workplan' ? '업무 항목' : '계획 항목'}</span>
           <button onClick={() => { setEditing(v => !v); setSel(null); setDraft(''); }} className={cn('w-7 h-7 flex items-center justify-center rounded-lg', editing ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:bg-slate-100')} title={editing ? '고치기 끝' : '항목 고치기'} aria-label={editing ? '고치기 끝' : '항목 고치기'}>
             {editing ? <Check size={15} /> : <Pencil size={14} />}
           </button>
@@ -145,7 +170,7 @@ export const PlanPalette: React.FC<{
             </div>
             <div className="flex items-center justify-between">
               {sel != null ? <button type="button" onClick={() => { setSel(null); setDraft(''); }} className="text-[11px] text-indigo-600 font-semibold">새 항목 더하기로</button> : <span />}
-              <button type="button" onClick={() => { update(DEFAULT_ITEMS); setSel(null); setDraft(''); }} className="text-[11px] text-slate-400 hover:text-slate-600">처음 항목으로 되돌리기</button>
+              <button type="button" onClick={() => { update(DEFAULTS); setSel(null); setDraft(''); }} className="text-[11px] text-slate-400 hover:text-slate-600">처음 항목으로 되돌리기</button>
             </div>
           </form>
         )}

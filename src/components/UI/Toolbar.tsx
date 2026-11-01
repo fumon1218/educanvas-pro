@@ -146,9 +146,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         ...(LITE ? [] : [
           { id: 'n-prayer', icon: HeartHandshake, label: '기도 제목', hint: '설교 공간에서 모아 보기', action: () => onNoteTool?.('prayer') },
           { id: 'n-bible', icon: BookOpen, label: '성경 구절 카드', hint: '예: 롬 8:28', action: () => onNoteTool?.('bible') },
-          { id: 'n-plan', icon: CalendarDays, label: '교회 계획 항목', hint: '자주 쓰는 일정을 끌어다 달력 칸에', action: () => onNoteTool?.('plan') },
         ]),
         { id: 'n-cal', icon: CalendarDays, label: '달력', hint: '월간 달력·주간 계획표 (공휴일 표시)', action: () => onNoteTool?.('calendar') },
+        { id: 'n-plan', icon: CalendarDays, label: '계획 항목', hint: '업무·교회 계획 달력 칸에 일정 끌어다 놓기', action: () => onNoteTool?.('plan') },
         { id: 'n-page', icon: FilePlus2, label: '쪽 더하기', hint: '줄·모눈·코넬·플래너·회의록 등 종이를 아래나 오른쪽에', action: () => onNoteTool?.('page') },
       ],
     },

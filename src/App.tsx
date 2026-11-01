@@ -26,7 +26,7 @@ import { LessonDashboard } from './components/UI/LessonDashboard';
 import { PromptHost, askText } from './components/UI/PromptHost';
 import { BibleHost, pickBible } from './components/UI/BiblePicker';
 import { CalendarHost, pickCalendar } from './components/UI/CalendarPicker';
-import { buildTemplateScene, type PaperStyle, type TemplateDef } from './lib/templates';
+import { buildTemplateScene, isMonthPaper, type PaperStyle, type TemplateDef } from './lib/templates';
 import { checkItemsOf, setCheckInData, type CheckItem } from './lib/noteOps';
 import { ClipSaveModal, StudyLogModal, FocusChip, FlashReviewBar, type FocusState } from './components/Study/StudyTools';
 import { WRONG_NOTE_ID, createClipScene, addToWrongNote, addStudyMinute, addFocusSession, nextDue, initialStudentMode, saveStudentMode } from './lib/study';
@@ -752,7 +752,7 @@ export default function App() {
     const t = opts.template;
     // 교회 계획은 몇 월 계획인지 고른다
     let planDate: Date | null = null;
-    if (t?.paper === 'churchplan') { planDate = await pickMonth('교회 계획', new Date()); if (!planDate) return; }
+    if (isMonthPaper(t?.paper)) { planDate = await pickMonth(t!.label, new Date()); if (!planDate) return; }
     if (!opts.skipSave && dirtyRef.current) await saveRef.current(false);
     if (!opts.skipSave && driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
     const now = new Date();
@@ -1112,14 +1112,15 @@ export default function App() {
     const wb = whiteboardRef.current;
     if (!wb) return;
     let date: Date | undefined;
-    const plan = style === 'churchplan' || (!style && !!wb.getPageInfo()?.kinds?.includes('churchplan') && wb.latestPlanMonth());
-    if (plan) {
-      const last = wb.latestPlanMonth();
+    const cur = wb.getPageInfo()?.current;
+    const planKind = isMonthPaper(style) ? style : !style && isMonthPaper(cur) ? (cur as PaperStyle) : null;
+    if (planKind) {
+      const last = wb.latestPlanMonth(planKind);
       const def = last ? (() => { const [y, m] = last.split('-').map(Number); return new Date(y, m, 1); })() : new Date();
-      const d = await pickMonth('교회 계획', def);
+      const d = await pickMonth(planKind === 'workplan' ? '업무 월간 계획' : '교회 계획', def);
       if (!d) return;
       date = d;
-      if (!style) style = 'churchplan';
+      if (!style) style = planKind;
     }
     const n = await wb.appendNotebookPage({ style, direction, date });
     if (n != null) toast.success(`${n}쪽을 더했습니다.`, { description: '선택 도구로 종이를 끌어 자리를 옮길 수 있습니다.' });
@@ -1128,7 +1129,8 @@ export default function App() {
   const handleNoteTool = useCallback(async (kind: 'todo' | 'prayer' | 'bible' | 'page' | 'calendar' | 'plan') => {
     if (kind === 'plan') {
       setPlanPaletteOpen(true);
-      if (!whiteboardRef.current?.getPageInfo()?.kinds?.includes('churchplan')) toast('교회 계획 항목', { description: '달력이 있는 교회 계획 노트에서 칸에 맞춰 놓입니다. [내 노트 → 설교 → 새 노트 → 교회 계획]' });
+      const ks = whiteboardRef.current?.getPageInfo()?.kinds || '';
+      if (!ks.includes('churchplan') && !ks.includes('workplan')) toast('계획 항목', { description: '달력이 있는 업무 월간 계획·교회 계획 노트에서 날짜 칸에 맞춰 놓입니다.' });
       return;
     }
     if (kind === 'page') {
@@ -1690,13 +1692,22 @@ export default function App() {
   useEffect(() => () => casterRef.current?.stop(), []);
 
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
+  // 지금 보이는 계획 종이 종류 → 계획 항목 판 (출시판에는 교회 계획 없음)
+  const planKind: 'churchplan' | 'workplan' | null = (() => {
+    const ks = (pageInfo?.kinds || '').split(',');
+    const cur = pageInfo?.current;
+    if (cur === 'workplan' || (cur === 'churchplan' && !LITE)) return cur;
+    if (ks.includes('workplan')) return 'workplan';
+    if (!LITE && ks.includes('churchplan')) return 'churchplan';
+    return null;
+  })();
   const pageInfoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleViewChange = useCallback(() => {
     if (!pageInfoTimer.current) {
       pageInfoTimer.current = setTimeout(() => {
         pageInfoTimer.current = null;
         const info = whiteboardRef.current?.getPageInfo() ?? null;
-        setPageInfo(prev => (prev && info && prev.index === info.index && prev.total === info.total && prev.pageNo === info.pageNo && prev.kinds === info.kinds ? prev : info));
+        setPageInfo(prev => (prev && info && prev.index === info.index && prev.total === info.total && prev.pageNo === info.pageNo && prev.kinds === info.kinds && prev.current === info.current ? prev : info));
       }, 150);
     }
     if (!casterRef.current || castViewTimer.current) return;
@@ -2120,8 +2131,10 @@ export default function App() {
       />
       )}
 
-      {!LITE && !isPresenting && planPaletteOpen && (pageInfo?.kinds?.includes('churchplan') || false) && (
+      {!isPresenting && planPaletteOpen && planKind && (
         <PlanPalette
+          key={planKind}
+          kind={planKind}
           className={chromeHidden ? 'top-4 right-4' : 'top-[168px] right-6'}
           onDrop={(x, y, item) => !!whiteboardRef.current?.dropPlanItem(x, y, item)}
           onDropCenter={item => {

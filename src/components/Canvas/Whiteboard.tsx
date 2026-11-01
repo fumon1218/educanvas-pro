@@ -13,7 +13,7 @@ import {
 } from '@/src/lib/canvasData';
 import { toast } from 'sonner';
 import { PressureBrush, getPenSettings, notePointer, deviceHasPen, rememberPen } from '@/src/lib/pen';
-import { appendPaper, churchPlanCells, makeChecklist, type PaperStyle } from '@/src/lib/templates';
+import { appendPaper, planCells, isMonthPaper, makeChecklist, type PaperStyle } from '@/src/lib/templates';
 
 export type ToolType =
   | 'pen' | 'eraser' | 'laser' | 'select' | 'lasso' | 'pencil' | 'fountain' | 'ballpoint'
@@ -101,7 +101,7 @@ export interface WhiteboardHandle {
   /** 이어 붙인 PDF 쪽 정보 (없으면 null) */
   /** 양식 칸에 적은 글 (예: 설교 노트 'passage' = 본문) */
   getFieldText: (key: string) => string;
-  getPageInfo: () => { index: number; total: number; pageNo: number; first: number; last: number; notebook?: boolean; kinds?: string } | null;
+  getPageInfo: () => { index: number; total: number; pageNo: number; first: number; last: number; notebook?: boolean; kinds?: string; current?: string } | null;
   /** 교회 계획 항목을 화면 좌표(clientX, clientY)에 놓는다 */
   dropPlanItem: (clientX: number, clientY: number, item: { text: string; kind: 'chip' | 'banner'; color: string }) => boolean;
   /** PDF 쪽 번호로 이동 */
@@ -116,7 +116,7 @@ export interface WhiteboardHandle {
   /** 공책 쪽 더하기 (종이 종류·방향을 고를 수 있음) */
   appendNotebookPage: (opts?: { style?: PaperStyle; direction?: 'down' | 'right'; date?: Date }) => Promise<number | null>;
   /** 이 슬라이드에서 가장 늦은 교회 계획 달 ('2026-11') */
-  latestPlanMonth: () => string | null;
+  latestPlanMonth: (kind?: string) => string | null;
   /** 이 슬라이드에 공책 종이가 있는가 */
   hasNotebookPages: () => boolean;
   /** 화면 가운데에 할 일·기도 제목 목록 넣기 */
@@ -1109,7 +1109,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       const i = Math.max(0, currentPageIndex(pages));
       const nos = pages.map(p => (p as any).pageNo as number);
       const kinds = [...new Set(pages.map((p: any) => p.notebook).filter(Boolean))].join(',');
-      return { index: i, total: pages.length, pageNo: nos[i], first: Math.min(...nos), last: Math.max(...nos), notebook, kinds };
+      return { index: i, total: pages.length, pageNo: nos[i], first: Math.min(...nos), last: Math.max(...nos), notebook, kinds, current: (pages[i] as any).notebook };
     },
     appendNotebookPage: async (opts = {}) => {
       const canvas = fabricRef.current;
@@ -1133,13 +1133,13 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       const v = canvas.viewportTransform;
       const sx = (clientX - rect.left - v[4]) / v[0], sy = (clientY - rect.top - v[5]) / v[3];
       // 놓은 곳의 교회 계획 종이와 날짜 칸
-      const page: any = canvas.getObjects().find((o: any) => o.notebook === 'churchplan' && o.planMonth && (() => { const r = o.getBoundingRect(); return sx >= r.left && sx <= r.left + r.width && sy >= r.top && sy <= r.top + r.height; })());
+      const page: any = canvas.getObjects().find((o: any) => isMonthPaper(o.notebook) && o.planMonth && (() => { const r = o.getBoundingRect(); return sx >= r.left && sx <= r.left + r.width && sy >= r.top && sy <= r.top + r.height; })());
       let left = sx, top = sy - 12, width = 140, k = 1;
       if (page) {
         k = page.scaleX || 1;
         const [yy, mm] = String(page.planMonth).split('-').map(Number);
         const px = (sx - page.left) / k, py = (sy - page.top) / k;
-        const cells = churchPlanCells(new Date(yy, mm - 1, 1));
+        const cells = planCells(page.notebook, new Date(yy, mm - 1, 1));
         const cell = cells.find(c => px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h);
         if (cell) {
           left = page.left + (cell.x + 6) * k;
@@ -1162,7 +1162,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       commitChange();
       return true;
     },
-    latestPlanMonth: () => { const ms = (fabricRef.current?.getObjects() || []).map((o: any) => o.planMonth).filter(Boolean).sort(); return ms.length ? ms[ms.length - 1] : null; },
+    latestPlanMonth: (kind?: string) => { const ms = (fabricRef.current?.getObjects() || []).filter((o: any) => !kind || o.notebook === kind).map((o: any) => o.planMonth).filter(Boolean).sort(); return ms.length ? ms[ms.length - 1] : null; },
     hasNotebookPages: () => !!fabricRef.current?.getObjects().some(isNotebookPage),
     addChecklist: (kind: 'todo' | 'prayer') => {
       const canvas = fabricRef.current;
