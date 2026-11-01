@@ -148,7 +148,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           { id: 'n-bible', icon: BookOpen, label: '성경 구절 카드', hint: '예: 롬 8:28', action: () => onNoteTool?.('bible') },
         ]),
         { id: 'n-cal', icon: CalendarDays, label: '달력', hint: '월간 달력·주간 계획표 (공휴일 표시)', action: () => onNoteTool?.('calendar') },
-        { id: 'n-page', icon: FilePlus2, label: '공책 쪽 추가', hint: '줄 공책·양식 노트 아래에 한 쪽 더', action: () => onNoteTool?.('page') },
+        { id: 'n-page', icon: FilePlus2, label: '쪽 더하기', hint: '줄·모눈·코넬·플래너·회의록 등 종이를 아래나 오른쪽에', action: () => onNoteTool?.('page') },
       ],
     },
     study: {

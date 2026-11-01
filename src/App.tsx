@@ -1,3 +1,4 @@
+import { AddPageHost, pickPage } from './components/UI/AddPagePicker';
 import { getAiKey } from './lib/aiKey';
 import { FocusBar } from './components/UI/FocusBar';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
@@ -1102,9 +1103,10 @@ export default function App() {
 
   const handleNoteTool = useCallback(async (kind: 'todo' | 'prayer' | 'bible' | 'page' | 'calendar') => {
     if (kind === 'page') {
-      const n = await whiteboardRef.current?.appendNotebookPage();
-      if (n == null) toast.info('공책 쪽은 양식으로 만든 노트에서 늘릴 수 있습니다.', { description: '[내 노트 → 새 노트 → 줄 공책·설교 노트·회의록 …]' });
-      else toast.success(`${n}쪽을 더했습니다.`);
+      const ch = await pickPage(!!whiteboardRef.current?.hasNotebookPages());
+      if (!ch) return;
+      const n = await whiteboardRef.current?.appendNotebookPage(ch);
+      if (n != null) toast.success(`${n}쪽을 더했습니다.`, { description: '선택 도구로 종이를 끌어 자리를 옮길 수 있습니다.' });
       return;
     }
     if (kind === 'calendar') {
@@ -2183,6 +2185,7 @@ export default function App() {
       <PromptHost />
       {!LITE && <BibleHost />}
       <CalendarHost />
+      <AddPageHost />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard
         isOpen={lessonsOpen}
