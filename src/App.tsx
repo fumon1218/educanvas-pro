@@ -104,7 +104,16 @@ export default function App() {
     mq.addEventListener('change', on);
     return () => mq.removeEventListener('change', on);
   }, []);
-  const isVertical = isVerticalPref && !isPhone;
+  // 휴대폰 가로(낮은 화면): 위 막대는 휴대폰처럼 작게, 도구는 왼쪽 세로 막대, 아래 막대는 판서 화면 위에 띄운다
+  const [isShort, setIsShort] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-height: 520px) and (min-width: 640px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-height: 520px) and (min-width: 640px)');
+    const on = () => setIsShort(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const compact = isPhone || isShort;
+  const isVertical = (isVerticalPref || isShort) && !isPhone;
   const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>('blank');
   const canvasBgRef = useRef(canvasBackground);
 
@@ -1906,7 +1915,7 @@ export default function App() {
       {!chromeHidden && (
       <TopNavBar
         studentMode={studentMode}
-        isPhone={isPhone}
+        isPhone={compact}
         projectName={projectName}
         onRenameProject={name => { setProjectName(name); markDirty(); }}
         onSave={() => { void saveToBrowser(!driveOnRef.current); if (driveOnRef.current) void saveToDrive({ manual: true }); }}
@@ -1958,7 +1967,7 @@ export default function App() {
       <div
         className={cn(
           'absolute z-0 overflow-hidden transition-[inset,border-radius] duration-300',
-          isPresenting ? 'inset-0' : focusMode ? 'inset-0 bg-white' : isPhone ? 'top-[60px] left-1 right-1 bottom-[114px] rounded-xl ring-1 ring-slate-900/[0.06] bg-white' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[88px] lg:left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
+          isPresenting ? 'inset-0' : focusMode ? 'inset-0 bg-white' : isShort ? 'top-[56px] left-[72px] right-2 bottom-2 rounded-xl ring-1 ring-slate-900/[0.06] bg-white' : isPhone ? 'top-[60px] left-1 right-1 bottom-[114px] rounded-xl ring-1 ring-slate-900/[0.06] bg-white' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[88px] lg:left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
         )}
       >
         <Whiteboard
@@ -2017,6 +2026,7 @@ export default function App() {
         onOpenStudy={() => setStudyOpen(true)}
         studentMode={studentMode}
         isPhone={isPhone}
+        isShort={isShort}
       />
 
       <LayerPanel
@@ -2047,7 +2057,7 @@ export default function App() {
           onStep={dir => { whiteboardRef.current?.stepPage(dir); }}
           onGo={n => !!whiteboardRef.current?.goToPageNo(n)}
           onAddPage={pageInfo.notebook ? () => { void handleNoteTool('page'); } : undefined}
-          className={chromeHidden ? 'top-4 left-4' : isPhone ? 'top-[68px] left-3' : isVertical ? 'top-[92px] left-[100px] lg:left-[172px]' : 'top-[92px] left-7'}
+          className={chromeHidden ? 'top-4 left-4' : isShort ? 'top-[64px] left-[82px]' : isPhone ? 'top-[68px] left-3' : isVertical ? 'top-[92px] left-[100px] lg:left-[172px]' : 'top-[92px] left-7'}
         />
       )}
       {activeScore && (
@@ -2115,7 +2125,8 @@ export default function App() {
 
       {!chromeHidden && (
       <BottomNavBar
-        isPhone={isPhone}
+        isPhone={compact}
+        isShort={isShort}
         zoomLevel={zoomLevel}
         onResetZoom={() => whiteboardRef.current?.resetZoom()}
         onZoomIn={() => whiteboardRef.current?.zoomIn()}

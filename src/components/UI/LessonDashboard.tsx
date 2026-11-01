@@ -230,20 +230,20 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
             className="relative w-full max-w-6xl h-full sm:h-[min(92vh,840px)] flex flex-col md:flex-row bg-white sm:rounded-3xl shadow-2xl ring-1 ring-black/5 overflow-hidden"
           >
             {/* 왼쪽: 공간 · 분류 */}
-            <aside className="md:w-64 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 bg-slate-50/60 flex flex-col min-h-0">
-              <div className="flex items-center gap-2 px-4 md:px-5 pt-3 md:pt-5 pb-2">
+            <aside className="md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 bg-slate-50/60 flex flex-col min-h-0">
+              <div className="flex items-center gap-2 px-4 md:px-5 pt-3 md:pt-5 [@media(max-height:560px)]:md:pt-2 pb-2">
                 <div className="p-2 rounded-xl bg-indigo-100 text-indigo-600"><LayoutGrid size={18} /></div>
                 <h2 className="text-lg font-bold text-slate-900 flex-1">내 노트</h2>
                 <button onClick={onClose} className="md:hidden p-2 text-slate-400 hover:bg-slate-100 rounded-full" aria-label="닫기"><X size={20} /></button>
               </div>
               {/* 공간 */}
-              <div className="px-3 pb-2 grid grid-cols-4 gap-1" role="tablist" aria-label="공간">
+              <div className="px-3 pb-2 grid grid-flow-col auto-cols-fr gap-1" role="tablist" aria-label="공간">
                 {SPACES.map(s => {
                   const Icon = SPACE_ICON[s.id];
                   const n = all.filter(l => !l.trashedAt && spaceOf(l) === s.id).length;
                   return (
                     <button key={s.id} role="tab" aria-selected={space === s.id} onClick={() => { setSpace(s.id); setQ(''); }}
-                      className={cn('h-14 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[12px] font-semibold', space === s.id ? 'bg-white shadow-sm ring-1 ring-slate-200 text-slate-900' : 'text-slate-500 hover:bg-white/70')}>
+                      className={cn('h-14 min-w-0 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[12px] font-semibold whitespace-nowrap tracking-tight', space === s.id ? 'bg-white shadow-sm ring-1 ring-slate-200 text-slate-900' : 'text-slate-500 hover:bg-white/70')}>
                       <Icon size={17} className={space === s.id ? SPACE_TINT[s.id] : ''} />{s.label}<span className="text-[10.5px] font-normal text-slate-400 -mt-0.5">{n}</span>
                     </button>
                   );
@@ -285,7 +285,7 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
                 <NavBtn v={{ kind: 'drive' }} icon={Cloud} label="구글 드라이브" />
                 <NavBtn v={{ kind: 'trash' }} icon={Trash2} label="휴지통" n={trash.length || undefined} />
               </nav>
-              <div className="hidden md:block m-3 p-3 rounded-2xl bg-white ring-1 ring-slate-200 text-[12px] leading-relaxed text-slate-600">
+              <div className="hidden md:block [@media(max-height:560px)]:!hidden m-3 p-3 rounded-2xl bg-white ring-1 ring-slate-200 text-[12px] leading-relaxed text-slate-600">
                 <div className="flex items-center gap-1.5 font-semibold text-slate-800"><HardDrive size={14} />저장 위치</div>
                 <p className="mt-1">이 컴퓨터의 이 브라우저 안 (자동 저장){TEST_MODE && <b className="text-red-600"> · 시험 모드 저장소</b>}</p>
                 <p className="mt-1 flex items-center gap-1">
