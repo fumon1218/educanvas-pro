@@ -9,10 +9,11 @@ import {
   attachVideoRenderLoop,
   downscaleImageFile,
   fileToDataURL,
+  EXTRA_PROPS,
 } from '@/src/lib/canvasData';
 import { toast } from 'sonner';
 import { PressureBrush, getPenSettings, notePointer, deviceHasPen, rememberPen } from '@/src/lib/pen';
-import { appendPaper, makeChecklist } from '@/src/lib/templates';
+import { appendPaper, makeChecklist, type PaperStyle } from '@/src/lib/templates';
 
 export type ToolType =
   | 'pen' | 'eraser' | 'laser' | 'select' | 'lasso' | 'pencil' | 'fountain' | 'ballpoint'
@@ -110,7 +111,10 @@ export interface WhiteboardHandle {
   /** 가림 카드 덮기/열기, 복습 단계 바꾸기 */
   setFlash: (id: string, patch: { revealed?: boolean; box?: number; due?: number }) => void;
   /** 공책(양식) 슬라이드에 쪽 하나 더하기. 공책이 아니면 null */
-  appendNotebookPage: () => Promise<number | null>;
+  /** 공책 쪽 더하기 (종이 종류·방향을 고를 수 있음) */
+  appendNotebookPage: (opts?: { style?: PaperStyle; direction?: 'down' | 'right' }) => Promise<number | null>;
+  /** 이 슬라이드에 공책 종이가 있는가 */
+  hasNotebookPages: () => boolean;
   /** 화면 가운데에 할 일·기도 제목 목록 넣기 */
   addChecklist: (kind: 'todo' | 'prayer') => void;
   /** 성경 구절 카드 넣기 */
@@ -226,6 +230,14 @@ function selectionOf(target: any): MediaSelection {
 }
 
 const isTextObj = (x: any): boolean => x instanceof fabric.IText;
+/** 양식 공책의 종이 한 쪽 (선택 도구로 고르면 그 위의 칸·필기와 함께 움직이고 복사된다) */
+const isNotebookPage = (o: any): boolean => !!o && !!o.notebook && o.pageNo != null;
+/** 읽는 순서 (위 → 아래, 같은 줄이면 왼쪽 → 오른쪽) */
+const readingOrder = (a: fabric.FabricObject, b: fabric.FabricObject) => {
+  const ra = a.getBoundingRect(), rb = b.getBoundingRect();
+  if (Math.abs(ra.top - rb.top) < Math.min(ra.height, rb.height) / 2) return ra.left - rb.left;
+  return ra.top - rb.top;
+};
 
 function isLocked(obj: fabric.FabricObject) {
   return !!(obj as any).locked;
@@ -388,6 +400,11 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     canvas.forEachObject(obj => {
       if (isHelper(obj)) return;
       const locked = isLocked(obj);
+      if (isNotebookPage(obj)) {
+        // 종이: 선택 도구로 골라 옮기기·복사 (크기·회전은 고정)
+        obj.set({ selectable: isSelect, evented: isSelect, lockMovementX: false, lockMovementY: false, lockScalingX: true, lockScalingY: true, lockRotation: true, hasControls: false, hoverCursor: 'move' });
+        return;
+      }
       obj.selectable = isSelect && !locked;
       obj.evented = (isSelect && !locked) || (isBucket && !locked);
     });
@@ -655,7 +672,14 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   const stackedPages = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return [];
-    return canvas.getObjects().filter(o => (o as any).pageNo != null && o.visible !== false).sort((a, b) => a.getBoundingRect().top - b.getBoundingRect().top);
+    return canvas.getObjects().filter(o => (o as any).pageNo != null && o.visible !== false).sort(readingOrder);
+  }, []);
+  /** 공책 쪽 번호를 놓인 순서(위→아래, 왼쪽→오른쪽)대로 다시 매긴다 */
+  const renumberPages = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    canvas.getObjects().filter(isNotebookPage).sort(readingOrder).forEach((p: any, i) => { p.pageNo = i + 1; });
+    forceRender(n => n + 1);
   }, []);
   const fitRect = useCallback((r: { left: number; top: number; width: number; height: number }, pad = 16) => {
     const canvas = fabricRef.current;
@@ -673,10 +697,13 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     if (!canvas || !pages.length) return -1;
     const v = canvas.viewportTransform;
     const cy = (canvas.height / 2 - v[5]) / v[3];
+    const cx = (canvas.width / 2 - v[4]) / v[0];
     let best = 0, bestD = Infinity;
     pages.forEach((p, i) => {
       const r = p.getBoundingRect();
-      const d = cy < r.top ? r.top - cy : cy > r.top + r.height ? cy - r.top - r.height : 0;
+      const dy = cy < r.top ? r.top - cy : cy > r.top + r.height ? cy - r.top - r.height : 0;
+      const dx = cx < r.left ? r.left - cx : cx > r.left + r.width ? cx - r.left - r.width : 0;
+      const d = Math.hypot(dx, dy);
       if (d < bestD) { bestD = d; best = i; }
     });
     return best;
@@ -739,7 +766,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   // ---------- 편집 동작 ----------
   const handleCopy = useCallback(() => {
     const active = fabricRef.current?.getActiveObject();
-    if (active) active.clone(['id', 'locked']).then(cloned => { globalClipboard = cloned; });
+    if (active) active.clone(EXTRA_PROPS).then(cloned => { globalClipboard = cloned; });
   }, []);
 
   const handleDeleteSelected = useCallback(() => {
@@ -757,7 +784,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   const handleCut = useCallback(() => {
     const active = fabricRef.current?.getActiveObject();
     if (!active) return;
-    active.clone(['id', 'locked']).then(cloned => {
+    active.clone(EXTRA_PROPS).then(cloned => {
       globalClipboard = cloned;
       handleDeleteSelected();
     });
@@ -766,9 +793,18 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
   const handlePaste = useCallback(async () => {
     const canvas = fabricRef.current;
     if (!canvas || !globalClipboard) return;
-    const cloned: any = await globalClipboard.clone(['locked']);
+    const cloned: any = await globalClipboard.clone(EXTRA_PROPS);
     canvas.discardActiveObject();
-    cloned.set({ left: cloned.left + 20, top: cloned.top + 20, evented: true });
+    // 종이 쪽을 붙여 넣으면 겹치지 않게 오른쪽 빈자리에
+    const hasPage = cloned instanceof fabric.ActiveSelection ? cloned.getObjects().some(isNotebookPage) : isNotebookPage(cloned);
+    if (hasPage) {
+      const pages = canvas.getObjects().filter(isNotebookPage);
+      const cb = cloned.getBoundingRect();
+      const right = Math.max(...pages.map(p => p.getBoundingRect().left + p.getBoundingRect().width), cb.left + cb.width);
+      const dx = right + 40 - cb.left;
+      cloned.set({ left: cloned.left + dx, evented: true });
+      globalClipboard.set({ left: (globalClipboard.left || 0) + dx - 20, top: (globalClipboard.top || 0) - 20 });
+    } else cloned.set({ left: cloned.left + 20, top: cloned.top + 20, evented: true });
     if (cloned instanceof fabric.ActiveSelection) {
       cloned.canvas = canvas;
       cloned.forEachObject((o: any) => { o.id = newId(); canvas.add(o); });
@@ -780,6 +816,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
     globalClipboard.set({ left: (globalClipboard.left || 0) + 20, top: (globalClipboard.top || 0) + 20 });
     if (toolRef.current !== 'select') propsRef.current.onRequestTool?.('select');
     canvas.setActiveObject(cloned);
+    if (hasPage) { applyToolState(); renumberPages(); }
     canvas.requestRenderAll();
     commitChange();
   }, [commitChange]);
@@ -1069,16 +1106,21 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       const nos = pages.map(p => (p as any).pageNo as number);
       return { index: i, total: pages.length, pageNo: nos[i], first: Math.min(...nos), last: Math.max(...nos), notebook };
     },
-    appendNotebookPage: async () => {
+    appendNotebookPage: async (opts = {}) => {
       const canvas = fabricRef.current;
       if (!canvas) return null;
-      const n = await appendPaper(canvas);
+      const nb = stackedPages().filter(isNotebookPage);
+      const cur = nb.length ? nb[Math.max(0, currentPageIndex(nb))] : null;
+      const n = await appendPaper(canvas, { ...opts, from: cur });
       if (n == null) return null;
-      const page = stackedPages().find(p => (p as any).pageNo === n);
+      const page: any = canvas.getObjects().find((p: any) => isNotebookPage(p) && p.pageNo === n);
+      applyToolState();
+      renumberPages();
       if (page) fitRect(page.getBoundingRect());
       commitChange();
-      return n;
+      return page?.pageNo ?? n;
     },
+    hasNotebookPages: () => !!fabricRef.current?.getObjects().some(isNotebookPage),
     addChecklist: (kind: 'todo' | 'prayer') => {
       const canvas = fabricRef.current;
       if (!canvas) return;
@@ -1381,7 +1423,11 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       if (!(obj as any).id) (obj as any).id = newId();
       if (obj.type !== 'path') commitChange(); // path는 path:created에서 처리
     });
-    canvas.on('object:modified', () => commitChange());
+    canvas.on('object:modified', e => {
+      const t: any = e.target;
+      if (isNotebookPage(t) || (t instanceof fabric.ActiveSelection && t.getObjects().some(isNotebookPage))) renumberPages();
+      commitChange();
+    });
     canvas.on('object:removed', e => {
       if (isHelper(e.target)) return;
       if (isRestoringRef.current || isLoadingRef.current) return;
@@ -1399,6 +1445,50 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       if (!cb) return;
       cb(selectionOf(target));
     };
+    // 종이를 고르면 그 위의 칸·필기도 함께 고른다 (같이 옮기고 복사되게)
+    const objectsOnPage = (a: any) => {
+      const r = a.getBoundingRect();
+      return canvas.getObjects().filter(o => o !== a && !isHelper(o) && !isNotebookPage(o) && o.visible !== false && !(isLocked(o) && !(o as any).field) && (() => {
+        const c = o.getCenterPoint();
+        return c.x >= r.left && c.x <= r.left + r.width && c.y >= r.top && c.y <= r.top + r.height;
+      })());
+    };
+    const expandPage = () => {
+      // 선택 처리가 끝난 뒤에 넓힌다 (선택 이벤트 안에서 바꾸면 Fabric이 되돌림)
+      setTimeout(() => {
+        const a: any = canvas.getActiveObject();
+        if (!isNotebookPage(a) || pageDrag.moved) return;
+        const on = objectsOnPage(a);
+        if (!on.length) return;
+        const sel = new fabric.ActiveSelection([a, ...on], { canvas });
+        sel.set({ hasControls: false, lockScalingX: true, lockScalingY: true, lockRotation: true });
+        canvas.setActiveObject(sel);
+        canvas.requestRenderAll();
+        emitSelection();
+      }, 0);
+    };
+    // 종이만 잡고 바로 끌 때도 그 위의 칸·필기가 함께 움직이게
+    const pageDrag: { page: any; items: fabric.FabricObject[]; x: number; y: number; moved: boolean } = { page: null, items: [], x: 0, y: 0, moved: false };
+    canvas.on('mouse:down', opt => {
+      const t: any = opt.target;
+      if (toolRef.current === 'select' && isNotebookPage(t)) Object.assign(pageDrag, { page: t, items: objectsOnPage(t), x: t.left, y: t.top, moved: false });
+      else pageDrag.page = null;
+    });
+    canvas.on('object:moving', opt => {
+      const t: any = opt.target;
+      if (!pageDrag.page || t !== pageDrag.page) return;
+      const dx = t.left - pageDrag.x, dy = t.top - pageDrag.y;
+      if (!dx && !dy) return;
+      pageDrag.moved = true;
+      pageDrag.items.forEach(o => { o.set({ left: (o.left || 0) + dx, top: (o.top || 0) + dy }); o.setCoords(); });
+      pageDrag.x = t.left; pageDrag.y = t.top;
+    });
+    canvas.on('mouse:up', () => {
+      if (pageDrag.page && pageDrag.moved) { const pg = pageDrag.page; pageDrag.page = null; renumberPages(); setTimeout(() => { canvas.setActiveObject(pg); expandAfterMove(); }, 0); }
+      else pageDrag.page = null;
+    });
+    const expandAfterMove = () => { pageDrag.moved = false; expandPage(); };
+    canvas.on('selection:created', expandPage);
     canvas.on('selection:created', emitSelection);
     canvas.on('selection:updated', emitSelection);
     canvas.on('selection:cleared', emitSelection);

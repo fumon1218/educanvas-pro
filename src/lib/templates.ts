@@ -274,17 +274,59 @@ export async function buildTemplateScene(t: TemplateDef, width: number, date = n
   return out;
 }
 
-/** 공책 슬라이드에 쪽 하나를 아래에 더한다 (같은 종이, 머리 칸 없이). 새 쪽 번호를 돌려준다 */
-export async function appendPaper(canvas: fabric.Canvas): Promise<number | null> {
-  const pages = canvas.getObjects().filter((o: any) => o.notebook && o.pageNo != null).sort((a: any, b: any) => a.top - b.top) as any[];
-  const last = pages[pages.length - 1];
-  if (!last) return null;
-  const style: PaperStyle = last.notebook === 'sermon' || last.notebook === 'meeting' || last.notebook === 'worklog' ? 'lined' : last.notebook;
-  const pageW = last.getScaledWidth();
-  const top = last.top + last.getScaledHeight() + 32;
-  const pageNo = Math.max(...pages.map(p => p.pageNo)) + 1;
+/** 쪽 더하기에서 고를 수 있는 종이 */
+export const PAPER_CHOICES: { style: PaperStyle; label: string; lite?: false }[] = [
+  { style: 'lined', label: '줄 공책' },
+  { style: 'grid', label: '모눈 공책' },
+  { style: 'blank', label: '빈 종이' },
+  { style: 'cornell', label: '코넬 공부 노트' },
+  { style: 'planner', label: '스터디 플래너' },
+  { style: 'meeting', label: '회의록' },
+  { style: 'worklog', label: '업무 일지' },
+  { style: 'sermon', label: '설교 노트', lite: false },
+];
+export const paperChoices = () => PAPER_CHOICES.filter(c => !(LITE && c.lite === false));
+
+export interface AddPageOpts {
+  /** 없으면 기준 쪽과 같은 종이(머리 칸 없이 이어 쓰기) */
+  style?: PaperStyle;
+  /** 아래로 / 오른쪽으로 */
+  direction?: 'down' | 'right';
+  /** 기준 쪽 (없으면 마지막 쪽) */
+  from?: fabric.FabricObject | null;
+}
+
+/**
+ * 공책 쪽 하나를 더한다. 기준 쪽의 아래 또는 오른쪽 빈자리에 놓는다.
+ * 쪽이 없는 슬라이드면 화면 가운데에 놓는다. 새 쪽 번호를 돌려준다.
+ */
+export async function appendPaper(canvas: fabric.Canvas, opts: AddPageOpts = {}): Promise<number | null> {
+  const pages = canvas.getObjects().filter((o: any) => o.notebook && o.pageNo != null) as any[];
+  const ref: any = opts.from && pages.includes(opts.from) ? opts.from : pages.slice().sort((a, b) => a.top - b.top || a.left - b.left)[pages.length - 1];
+  let style: PaperStyle;
+  let first: boolean;
+  if (opts.style) { style = opts.style; first = true; }
+  else if (ref) { style = ref.notebook === 'sermon' || ref.notebook === 'meeting' || ref.notebook === 'worklog' ? 'lined' : ref.notebook; first = false; }
+  else return null;
+  let pageW: number, left: number, top: number;
+  if (ref) {
+    const r = ref.getBoundingRect();
+    pageW = ref.getScaledWidth();
+    const pageH = pageW * (PAPER_H / PAPER_W);
+    const gap = 40;
+    left = r.left; top = r.top;
+    const hits = (l: number, t: number) => pages.some(p => { const q = p.getBoundingRect(); return l < q.left + q.width && l + pageW > q.left && t < q.top + q.height && t + pageH > q.top; });
+    if (opts.direction === 'right') { left = r.left + r.width + gap; while (hits(left, top)) left += pageW + gap; }
+    else { top = r.top + r.height + gap; while (hits(left, top)) top += pageH + gap; }
+  } else {
+    const z = canvas.getZoom();
+    const c = canvas.getVpCenter();
+    pageW = Math.min(Math.max(400, canvas.width / z - 100), 1000);
+    left = c.x - pageW / 2; top = c.y - (pageW * PAPER_H / PAPER_W) / 2;
+  }
+  const pageNo = (pages.length ? Math.max(...pages.map(p => p.pageNo)) : 0) + 1;
   const before = canvas.getObjects().length;
-  await addPaper(canvas, style, false, pageNo, last.left, top, pageW, new Date());
+  await addPaper(canvas, style, first, pageNo, left, top, pageW, new Date());
   // 새 종이는 맨 뒤(다른 판서 아래)로
   const added = canvas.getObjects().slice(before);
   added.filter((o: any) => o.isBackground).forEach(o => canvas.sendObjectToBack(o));
