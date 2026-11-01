@@ -20,7 +20,8 @@ export class SyncError extends Error {
 // ---------- 권한 ----------
 export function cachedToken(): string | null {
   try {
-    const v = JSON.parse(sessionStorage.getItem(TOKEN_KEY) || 'null');
+    // 아이폰 홈 화면 앱은 자주 다시 시작되어 sessionStorage가 지워지므로 localStorage에 둔다 (1시간 안에만 씀)
+    const v = JSON.parse(localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || 'null');
     if (v && v.until > Date.now() + 60_000 && v.email === auth.currentUser?.email) return v.token;
   } catch { /* 무시 */ }
   return null;
@@ -37,18 +38,19 @@ export async function connectDrive(): Promise<string> {
     const r = await reauthenticateWithPopup(user, provider);
     const token = GoogleAuthProvider.credentialFromResult(r)?.accessToken;
     if (!token) throw new SyncError('need-auth', '드라이브 권한을 받지 못했습니다.');
-    try { sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, until: Date.now() + 55 * 60_000, email: user.email })); } catch { /* 무시 */ }
+    try { localStorage.setItem(TOKEN_KEY, JSON.stringify({ token, until: Date.now() + 55 * 60_000, email: user.email })); } catch { /* 무시 */ }
     return token;
   } catch (e: any) {
     if (e instanceof SyncError) throw e;
     if (e?.code === 'auth/popup-closed-by-user' || e?.code === 'auth/cancelled-popup-request') throw new SyncError('cancelled', '취소했습니다.');
     if (e?.code === 'auth/popup-blocked') throw new SyncError('need-auth', '팝업이 막혀 있습니다. 주소창 오른쪽에서 팝업을 허용해 주세요.');
     if (e?.code === 'auth/user-mismatch') throw new SyncError('need-auth', '지금 로그인한 계정과 같은 계정을 골라 주세요.');
-    throw new SyncError('other', e?.message || '드라이브에 연결하지 못했습니다.');
+    const code = e?.code ? ` [${e.code}]` : '';
+    throw new SyncError('other', `${e?.message || '드라이브에 연결하지 못했습니다.'}${code && !String(e?.message).includes(e.code) ? code : ''}`);
   }
 }
 
-function forget() { try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* 무시 */ } }
+function forget() { try { sessionStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TOKEN_KEY); } catch { /* 무시 */ } }
 
 async function call(token: string, url: string, init: RequestInit = {}): Promise<Response> {
   let res: Response;
