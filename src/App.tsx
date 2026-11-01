@@ -1,3 +1,4 @@
+import { PlanPalette } from './components/UI/PlanPalette';
 import { AddPageHost, pickPage } from './components/UI/AddPagePicker';
 import { getAiKey } from './lib/aiKey';
 import { FocusBar } from './components/UI/FocusBar';
@@ -127,6 +128,7 @@ export default function App() {
   const [isPresenting, setIsPresenting] = useState(false);
   /** 집중 모드: 막대를 모두 숨기고 작은 도구 막대만 */
   const [focusMode, setFocusMode] = useState(false);
+  const [planPaletteOpen, setPlanPaletteOpen] = useState(true);
   // AI 키가 있는지 (설정에서 넣거나 지우면 바로 반영)
   const [aiReady, setAiReady] = useState(() => !!getAiKey());
   useEffect(() => { const on = () => setAiReady(!!getAiKey()); window.addEventListener('okssam:ai-key', on); return () => window.removeEventListener('okssam:ai-key', on); }, []);
@@ -1101,7 +1103,12 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [captureCurrent, updateScenes]);
 
-  const handleNoteTool = useCallback(async (kind: 'todo' | 'prayer' | 'bible' | 'page' | 'calendar') => {
+  const handleNoteTool = useCallback(async (kind: 'todo' | 'prayer' | 'bible' | 'page' | 'calendar' | 'plan') => {
+    if (kind === 'plan') {
+      setPlanPaletteOpen(true);
+      if (!whiteboardRef.current?.getPageInfo()?.kinds?.includes('churchplan')) toast('교회 계획 항목', { description: '달력이 있는 교회 계획 노트에서 칸에 맞춰 놓입니다. [내 노트 → 설교 → 새 노트 → 교회 계획]' });
+      return;
+    }
     if (kind === 'page') {
       const ch = await pickPage(!!whiteboardRef.current?.hasNotebookPages());
       if (!ch) return;
@@ -1668,7 +1675,7 @@ export default function App() {
       pageInfoTimer.current = setTimeout(() => {
         pageInfoTimer.current = null;
         const info = whiteboardRef.current?.getPageInfo() ?? null;
-        setPageInfo(prev => (prev && info && prev.index === info.index && prev.total === info.total && prev.pageNo === info.pageNo ? prev : info));
+        setPageInfo(prev => (prev && info && prev.index === info.index && prev.total === info.total && prev.pageNo === info.pageNo && prev.kinds === info.kinds ? prev : info));
       }, 150);
     }
     if (!casterRef.current || castViewTimer.current) return;
@@ -2090,6 +2097,18 @@ export default function App() {
         onRecord={openRecordDialog}
         isRecording={recState !== 'idle'}
       />
+      )}
+
+      {!LITE && !isPresenting && planPaletteOpen && (pageInfo?.kinds?.includes('churchplan') || false) && (
+        <PlanPalette
+          className={chromeHidden ? 'top-4 right-4' : 'top-[168px] right-6'}
+          onDrop={(x, y, item) => !!whiteboardRef.current?.dropPlanItem(x, y, item)}
+          onDropCenter={item => {
+            const r = whiteboardRef.current?.getCanvas()?.upperCanvasEl.getBoundingClientRect();
+            if (r) whiteboardRef.current?.dropPlanItem(r.left + r.width / 2, r.top + r.height / 2, item);
+          }}
+          onClose={() => setPlanPaletteOpen(false)}
+        />
       )}
 
       {focusMode && !isPresenting && (
