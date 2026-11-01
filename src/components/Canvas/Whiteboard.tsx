@@ -114,7 +114,9 @@ export interface WhiteboardHandle {
   setFlash: (id: string, patch: { revealed?: boolean; box?: number; due?: number }) => void;
   /** 공책(양식) 슬라이드에 쪽 하나 더하기. 공책이 아니면 null */
   /** 공책 쪽 더하기 (종이 종류·방향을 고를 수 있음) */
-  appendNotebookPage: (opts?: { style?: PaperStyle; direction?: 'down' | 'right' }) => Promise<number | null>;
+  appendNotebookPage: (opts?: { style?: PaperStyle; direction?: 'down' | 'right'; date?: Date }) => Promise<number | null>;
+  /** 이 슬라이드에서 가장 늦은 교회 계획 달 ('2026-11') */
+  latestPlanMonth: () => string | null;
   /** 이 슬라이드에 공책 종이가 있는가 */
   hasNotebookPages: () => boolean;
   /** 화면 가운데에 할 일·기도 제목 목록 넣기 */
@@ -1160,6 +1162,7 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       commitChange();
       return true;
     },
+    latestPlanMonth: () => { const ms = (fabricRef.current?.getObjects() || []).map((o: any) => o.planMonth).filter(Boolean).sort(); return ms.length ? ms[ms.length - 1] : null; },
     hasNotebookPages: () => !!fabricRef.current?.getObjects().some(isNotebookPage),
     addChecklist: (kind: 'todo' | 'prayer') => {
       const canvas = fabricRef.current;

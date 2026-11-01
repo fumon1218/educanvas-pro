@@ -405,6 +405,8 @@ export interface AddPageOpts {
   direction?: 'down' | 'right';
   /** 기준 쪽 (없으면 마지막 쪽) */
   from?: fabric.FabricObject | null;
+  /** 교회 계획 등 날짜가 들어가는 종이의 달 */
+  date?: Date;
 }
 
 /**
@@ -420,8 +422,8 @@ export async function appendPaper(canvas: fabric.Canvas, opts: AddPageOpts = {})
   else if (ref) { style = ref.notebook === 'sermon' || ref.notebook === 'meeting' || ref.notebook === 'worklog' ? 'lined' : ref.notebook; first = ref.notebook === 'churchplan'; }
   else return null;
   // 교회 계획은 다음 달로 (가장 늦은 달 다음)
-  let date = new Date();
-  if (style === 'churchplan') {
+  let date = opts.date || new Date();
+  if (style === 'churchplan' && !opts.date) {
     const months = pages.map(p => p.planMonth).filter(Boolean).sort();
     if (months.length) { const [yy, mm] = months[months.length - 1].split('-').map(Number); date = new Date(yy, mm, 1); }
   }

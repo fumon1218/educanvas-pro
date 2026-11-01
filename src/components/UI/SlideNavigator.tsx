@@ -120,7 +120,8 @@ export const SlideNavigator: React.FC<SlideNavigatorProps> = ({
                             e.stopPropagation();
                             onRemoveSlide(slide.id);
                           }}
-                          className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 shadow-lg"
+                          className="absolute top-2 right-2 p-2 bg-red-500/90 text-white rounded-lg opacity-70 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity hover:bg-red-600 shadow-lg"
+                          title="슬라이드 삭제" aria-label={`${index + 1}번 슬라이드 삭제`}
                         >
                           <Trash2 size={14} />
                         </button>

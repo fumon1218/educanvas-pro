@@ -1,3 +1,4 @@
+import { MonthPickerHost, pickMonth } from './components/UI/MonthPicker';
 import { PlanPalette } from './components/UI/PlanPalette';
 import { AddPageHost, pickPage } from './components/UI/AddPagePicker';
 import { getAiKey } from './lib/aiKey';
@@ -25,7 +26,7 @@ import { LessonDashboard } from './components/UI/LessonDashboard';
 import { PromptHost, askText } from './components/UI/PromptHost';
 import { BibleHost, pickBible } from './components/UI/BiblePicker';
 import { CalendarHost, pickCalendar } from './components/UI/CalendarPicker';
-import { buildTemplateScene, type TemplateDef } from './lib/templates';
+import { buildTemplateScene, type PaperStyle, type TemplateDef } from './lib/templates';
 import { checkItemsOf, setCheckInData, type CheckItem } from './lib/noteOps';
 import { ClipSaveModal, StudyLogModal, FocusChip, FlashReviewBar, type FocusState } from './components/Study/StudyTools';
 import { WRONG_NOTE_ID, createClipScene, addToWrongNote, addStudyMinute, addFocusSession, nextDue, initialStudentMode, saveStudentMode } from './lib/study';
@@ -748,15 +749,18 @@ export default function App() {
   }, []);
 
   const newLesson = useCallback(async (opts: { category?: string; space?: Space; template?: TemplateDef; skipSave?: boolean } = {}) => {
+    const t = opts.template;
+    // 교회 계획은 몇 월 계획인지 고른다
+    let planDate: Date | null = null;
+    if (t?.paper === 'churchplan') { planDate = await pickMonth('교회 계획', new Date()); if (!planDate) return; }
     if (!opts.skipSave && dirtyRef.current) await saveRef.current(false);
     if (!opts.skipSave && driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
     const now = new Date();
-    const t = opts.template;
     const space = opts.space || t?.space || 'lesson';
     const w = whiteboardRef.current?.getCanvas()?.width || window.innerWidth;
-    const data = t ? await buildTemplateScene(t, w, now) : null;
+    const data = t ? await buildTemplateScene(t, w, planDate || now) : null;
     const first: Scene = { id: newId(), name: t?.paper ? '1쪽' : '슬라이드 1', data, order: 0 };
-    const name = t ? t.name(now) : '새 수업';
+    const name = t ? t.name(planDate || now) : '새 수업';
     const noteDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     applyProject({ format: 'educanvas-project', version: 1, name, savedAt: now.toISOString(), activeSceneId: first.id, canvasBackground: 'blank', scenes: [{ id: first.id, name: first.name, data }] }, { publish: true });
     lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null, category: opts.category, space, noteDate };
@@ -1103,6 +1107,24 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [captureCurrent, updateScenes]);
 
+  /** 지금 노트(슬라이드)에 종이 한 쪽 더하기. 교회 계획이면 몇 월인지 묻는다 */
+  const addPageWith = async (style?: PaperStyle, direction: 'down' | 'right' = 'right') => {
+    const wb = whiteboardRef.current;
+    if (!wb) return;
+    let date: Date | undefined;
+    const plan = style === 'churchplan' || (!style && !!wb.getPageInfo()?.kinds?.includes('churchplan') && wb.latestPlanMonth());
+    if (plan) {
+      const last = wb.latestPlanMonth();
+      const def = last ? (() => { const [y, m] = last.split('-').map(Number); return new Date(y, m, 1); })() : new Date();
+      const d = await pickMonth('교회 계획', def);
+      if (!d) return;
+      date = d;
+      if (!style) style = 'churchplan';
+    }
+    const n = await wb.appendNotebookPage({ style, direction, date });
+    if (n != null) toast.success(`${n}쪽을 더했습니다.`, { description: '선택 도구로 종이를 끌어 자리를 옮길 수 있습니다.' });
+  };
+
   const handleNoteTool = useCallback(async (kind: 'todo' | 'prayer' | 'bible' | 'page' | 'calendar' | 'plan') => {
     if (kind === 'plan') {
       setPlanPaletteOpen(true);
@@ -1112,8 +1134,7 @@ export default function App() {
     if (kind === 'page') {
       const ch = await pickPage(!!whiteboardRef.current?.hasNotebookPages());
       if (!ch) return;
-      const n = await whiteboardRef.current?.appendNotebookPage(ch);
-      if (n != null) toast.success(`${n}쪽을 더했습니다.`, { description: '선택 도구로 종이를 끌어 자리를 옮길 수 있습니다.' });
+      await addPageWith(ch.style, ch.direction);
       return;
     }
     if (kind === 'calendar') {
@@ -2205,6 +2226,7 @@ export default function App() {
       {!LITE && <BibleHost />}
       <CalendarHost />
       <AddPageHost />
+      <MonthPickerHost />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard
         isOpen={lessonsOpen}
@@ -2223,6 +2245,7 @@ export default function App() {
         saveCurrent={async () => { if (dirtyRef.current) await saveRef.current(false); }}
         onOpen={id => { void openLocalLesson(id); }}
         onNew={o => { void newLesson(o); }}
+        onAddAsPage={t => { setLessonsOpen(false); if (t.paper) setTimeout(() => { void addPageWith(t.paper, whiteboardRef.current?.hasNotebookPages() ? 'right' : 'down'); }, 250); }}
         onImportFile={() => projectFileInputRef.current?.click()}
         onShowHistory={id => { setHistoryLesson(id); setHistoryOpen(true); }}
         onCurrentTrashed={() => { dirtyRef.current = false; void newLesson({ skipSave: true }); }}
