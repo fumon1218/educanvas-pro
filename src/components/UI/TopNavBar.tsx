@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown, Users, Share, Save, FolderOpen, FileText, Trash2, LayoutTemplate, Settings, Sparkles, ArrowRight,
   Download, Upload, File as FileIcon, Presentation, PanelBottomClose, Flashlight, Timer, Play, Cloud, CloudOff, Eraser, Paintbrush, MonitorSmartphone,
-  History, LayoutGrid, MoreHorizontal,
+  History, LayoutGrid, MoreHorizontal, Maximize2, ChevronsRight,
 } from 'lucide-react';
 import { glass } from './BottomNavBar';
 import { cn } from '@/src/lib/utils';
@@ -24,6 +24,8 @@ interface TopNavBarProps {
   onExportCurrentPDF: () => void;
   onClearAll: () => void;
   onOpenSettings: () => void;
+  /** 집중 모드: 위·왼쪽·아래 막대를 모두 숨김 */
+  onFocusMode?: () => void;
   onToggleLayout: () => void;
   onGenerate: (query: string) => void;
   onShare: () => void;
@@ -77,8 +79,11 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   onClearAll, onOpenSettings, onToggleLayout, onGenerate, onShare, onOpenMultiplayer,
   isGenerating = false, aiEnabled = false, isSharing = false, peerStatus = 'disconnected', peerCount = 0,
   onPresent, onToggleShade, onToggleSpotlight, onToggleTimer, shadeOn = false, spotlightOn = false, timerOn = false, saveState = 'saved',
-  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false, driveState = 'off', onOpenLessons, studentMode = false, isPhone = false,
+  background, onBackgroundChange, onOpenStudentCast, castCount = 0, castOn = false, driveState = 'off', onOpenLessons, studentMode = false, isPhone = false, onFocusMode,
 }) => {
+  // 오른쪽 위 도구 묶음 접기 (이 기기에 기억)
+  const [toolsCollapsed, setToolsCollapsed] = useState(() => { try { return localStorage.getItem('okssam_tools_collapsed') === '1'; } catch { return false; } });
+  const collapseTools = (v: boolean) => { setToolsCollapsed(v); if (v) setBgOpen(false); try { localStorage.setItem('okssam_tools_collapsed', v ? '1' : '0'); } catch { /* 무시 */ } };
   const [bgOpen, setBgOpen] = useState(false);
   const bgRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -222,6 +227,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
 
         {isPhone && <PhoneMore items={[
           { label: '발표', icon: Play, onClick: onPresent },
+          ...(onFocusMode ? [{ label: '집중 모드 (막대 숨기기)', icon: Maximize2, onClick: onFocusMode }] : []),
           ...(!studentMode ? [{ label: castOn ? `학생 화면 · ${castCount}명` : '학생 화면', icon: MonitorSmartphone, onClick: onOpenStudentCast }, { label: '협업', icon: Users, onClick: onOpenMultiplayer }, { label: isSharing ? '링크 복사' : '공유', icon: Share, onClick: onShare }] : []),
           { label: '가림막', icon: PanelBottomClose, onClick: onToggleShade, on: shadeOn },
           { label: '스포트라이트', icon: Flashlight, onClick: onToggleSpotlight, on: spotlightOn },
@@ -261,7 +267,7 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
         <div className={cn('relative hidden lg:flex items-center w-56 h-10 rounded-xl bg-slate-100/80 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-200 transition-all focus-within:w-72', !aiEnabled && 'opacity-70')}>
           <input
             type="text"
-            placeholder={aiEnabled ? 'AI에게 판서 정리 부탁하기…' : 'AI 기능 준비 중'}
+            placeholder={aiEnabled ? 'AI에게 판서 정리 부탁하기…' : 'AI: 설정에서 키를 넣어 주세요'}
             className="flex-1 min-w-0 bg-transparent outline-none pl-3.5 text-[13px] text-slate-700 placeholder:text-slate-400"
             value={query}
             onChange={e => setQuery(e.target.value)}
@@ -278,13 +284,21 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
 
       {/* 오른쪽 위 수업 도구 카드 (휴대폰은 ⋯ 메뉴) */}
       <div ref={bgRef} className={cn('absolute z-40 items-center gap-0.5 p-1.5 rounded-2xl', isPhone ? 'top-[60px] right-2 flex p-0 bg-transparent' : 'top-[86px] right-6 flex', !isPhone && glass)}>
-        {!isPhone && <>
+        {!isPhone && toolsCollapsed && <>
+        {onFocusMode && <CardBtn icon={Maximize2} label="집중" title="집중 모드: 막대를 모두 숨기고 넓게 쓰기" onClick={onFocusMode} />}
+        <button onClick={() => collapseTools(false)} title="수업 도구 펼치기" aria-label="수업 도구 펼치기" aria-expanded={false}
+          className="w-10 h-[44px] lg:h-[56px] flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-900/[0.05]"><MoreHorizontal size={19} /></button>
+        </>}
+        {!isPhone && !toolsCollapsed && <>
+        {onFocusMode && <CardBtn icon={Maximize2} label="집중" title="집중 모드: 막대를 모두 숨기고 넓게 쓰기" onClick={onFocusMode} />}
         <CardBtn icon={PanelBottomClose} label="가림막" active={shadeOn} onClick={onToggleShade} />
         <CardBtn icon={Flashlight} label="스포트라이트" active={spotlightOn} onClick={onToggleSpotlight} />
         <CardBtn icon={Timer} label="타이머" active={timerOn} onClick={onToggleTimer} />
         <CardBtn icon={Paintbrush} label="배경" title="수업 배경 (오선지·원고지·영어 4선 등)" active={bgOpen} onClick={() => setBgOpen(o => !o)} />
         <CardBtn icon={Eraser} label="지우기" title="이 슬라이드 지우기" danger onClick={onClearAll} />
         <CardBtn icon={Settings} label="설정" onClick={onOpenSettings} />
+        <button onClick={() => collapseTools(true)} title="수업 도구 접기" aria-label="수업 도구 접기" aria-expanded
+          className="w-7 h-[44px] lg:h-[56px] flex items-center justify-center rounded-xl text-slate-400 hover:bg-slate-900/[0.05] hover:text-slate-600"><ChevronsRight size={16} /></button>
         </>}
         <AnimatePresence>
           {bgOpen && (

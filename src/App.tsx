@@ -1,3 +1,5 @@
+import { getAiKey } from './lib/aiKey';
+import { FocusBar } from './components/UI/FocusBar';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type * as fabric from 'fabric';
 import { Whiteboard, WhiteboardHandle, ToolType, CanvasBackground, MediaSelection, CanvasChangeInfo, coordOrigin } from './components/Canvas/Whiteboard';
@@ -79,7 +81,6 @@ interface Scene {
 
 const FIRESTORE_SCENE_LIMIT = 900_000;
 const AUTOSAVE_MS = 30_000;
-const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 
 export default function App() {
   const whiteboardRef = useRef<WhiteboardHandle>(null);
@@ -123,6 +124,12 @@ export default function App() {
 
   // ---------- 발표 모드 · 수업 도구 · 녹화 ----------
   const [isPresenting, setIsPresenting] = useState(false);
+  /** 집중 모드: 막대를 모두 숨기고 작은 도구 막대만 */
+  const [focusMode, setFocusMode] = useState(false);
+  // AI 키가 있는지 (설정에서 넣거나 지우면 바로 반영)
+  const [aiReady, setAiReady] = useState(() => !!getAiKey());
+  useEffect(() => { const on = () => setAiReady(!!getAiKey()); window.addEventListener('okssam:ai-key', on); return () => window.removeEventListener('okssam:ai-key', on); }, []);
+  const chromeHidden = isPresenting || focusMode;
   const isPresentingRef = useRef(false);
   isPresentingRef.current = isPresenting;
   const [shadeOn, setShadeOn] = useState(false);
@@ -1304,8 +1311,9 @@ export default function App() {
   // =====================================================================
   const handleGenerate = async (q: string) => {
     if (!q.trim()) return;
+    const GEMINI_KEY = getAiKey();
     if (!GEMINI_KEY) {
-      toast.error('AI 기능이 아직 설정되지 않았습니다.', { description: '관리자가 GEMINI_API_KEY를 설정해야 사용할 수 있습니다.' });
+      toast.error('AI 키가 없습니다.', { description: '[설정 → AI 기능]에 Gemini 키를 넣으면 쓸 수 있습니다 (무료).', action: { label: '설정 열기', onClick: () => setIsSettingsOpen(true) } });
       return;
     }
     setIsGenerating(true);
@@ -1321,7 +1329,10 @@ export default function App() {
       else toast.error('AI가 내용을 만들지 못했습니다.');
     } catch (err) {
       console.error('Gemini 오류:', err);
-      toast.error('AI 생성 중 오류가 발생했습니다.', { description: '잠시 후 다시 시도해 주세요.' });
+      const m = String((err as any)?.message || err);
+      if (/API key not valid|API_KEY_INVALID|PERMISSION_DENIED/i.test(m)) toast.error('AI 키가 맞지 않습니다.', { description: '[설정 → AI 기능]에서 키를 지우고 다시 넣어 주세요.', action: { label: '설정 열기', onClick: () => setIsSettingsOpen(true) } });
+      else if (/RESOURCE_EXHAUSTED|quota|429/i.test(m)) toast.error('오늘 쓸 수 있는 무료 사용량을 다 썼습니다.', { description: '잠시 뒤나 내일 다시 시도해 주세요. (요금은 나오지 않습니다)' });
+      else toast.error('AI 생성 중 오류가 발생했습니다.', { description: '잠시 후 다시 시도해 주세요.' });
     } finally {
       setIsGenerating(false);
     }
@@ -1847,7 +1858,7 @@ export default function App() {
     <div className={cn('fixed inset-0 overflow-hidden font-sans text-slate-900', isPresenting ? 'bg-white' : 'bg-[#eef1f6]')}>
       <Toaster position="top-center" offset={84} richColors closeButton />
 
-      {!isPresenting && (
+      {!chromeHidden && (
       <TopNavBar
         studentMode={studentMode}
         isPhone={isPhone}
@@ -1862,12 +1873,13 @@ export default function App() {
         onExportCurrentPDF={() => handleExportPDF('current')}
         onClearAll={handleClear}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onFocusMode={() => { setFocusMode(true); toast('집중 모드', { description: '아래 작은 막대로 펜·지우개를 고릅니다. [끝] 또는 Esc로 돌아갑니다.', duration: 4000 }); }}
         onToggleLayout={() => setIsVertical(v => !v)}
         onGenerate={handleGenerate}
         onShare={handleShare}
         onOpenMultiplayer={() => setIsCollaborationModalOpen(true)}
         isGenerating={isGenerating}
-        aiEnabled={!!GEMINI_KEY}
+        aiEnabled={aiReady}
         isSharing={!!boardId && !!user}
         peerStatus={multiplayer.status}
         peerCount={multiplayer.peers.length + (multiplayer.status === 'connected' ? 1 : 0)}
@@ -1901,7 +1913,7 @@ export default function App() {
       <div
         className={cn(
           'absolute z-0 overflow-hidden transition-[inset,border-radius] duration-300',
-          isPresenting ? 'inset-0' : isPhone ? 'top-[60px] left-1 right-1 bottom-[114px] rounded-xl ring-1 ring-slate-900/[0.06] bg-white' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[88px] lg:left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
+          isPresenting ? 'inset-0' : focusMode ? 'inset-0 bg-white' : isPhone ? 'top-[60px] left-1 right-1 bottom-[114px] rounded-xl ring-1 ring-slate-900/[0.06] bg-white' : cn('top-[80px] right-4 rounded-2xl ring-1 ring-slate-900/[0.06] shadow-[0_2px_20px_-8px_rgba(15,23,42,0.18)] bg-white', isVertical ? 'left-[88px] lg:left-[160px] bottom-[100px]' : 'left-4 bottom-[160px]'),
         )}
       >
         <Whiteboard
@@ -1935,7 +1947,7 @@ export default function App() {
         />
       </div>
 
-      {!isPresenting && (<>
+      {!chromeHidden && (<>
       <Toolbar
         activeTool={activeTool}
         onToolSelect={setActiveTool}
@@ -1981,7 +1993,7 @@ export default function App() {
           poll={castPoll}
           onPoll={p => { setCastPoll(p); casterRef.current?.setPoll(p); }}
           onLower={sid => casterRef.current?.lowerHands(sid)}
-          className={isPresenting ? 'top-4 right-4' : 'top-[156px] right-6'}
+          className={chromeHidden ? 'top-4 right-4' : 'top-[156px] right-6'}
         />
       )}
       {pageInfo && (
@@ -1990,7 +2002,7 @@ export default function App() {
           onStep={dir => { whiteboardRef.current?.stepPage(dir); }}
           onGo={n => !!whiteboardRef.current?.goToPageNo(n)}
           onAddPage={pageInfo.notebook ? () => { void handleNoteTool('page'); } : undefined}
-          className={isPresenting ? 'top-4 left-4' : isPhone ? 'top-[68px] left-3' : isVertical ? 'top-[92px] left-[100px] lg:left-[172px]' : 'top-[92px] left-7'}
+          className={chromeHidden ? 'top-4 left-4' : isPhone ? 'top-[68px] left-3' : isVertical ? 'top-[92px] left-[100px] lg:left-[172px]' : 'top-[92px] left-7'}
         />
       )}
       {activeScore && (
@@ -2056,7 +2068,7 @@ export default function App() {
         onInsert={async a => { setAssetsOpen(false); await whiteboardRef.current?.addModelCard(a); openModelWindow(a.id, a.name, a.driveId); }}
       />
 
-      {!isPresenting && (
+      {!chromeHidden && (
       <BottomNavBar
         isPhone={isPhone}
         zoomLevel={zoomLevel}
@@ -2076,6 +2088,18 @@ export default function App() {
         onRecord={openRecordDialog}
         isRecording={recState !== 'idle'}
       />
+      )}
+
+      {focusMode && !isPresenting && (
+        <FocusBar
+          tool={activeTool}
+          onTool={setActiveTool}
+          color={color}
+          onColor={setColor}
+          onUndo={() => whiteboardRef.current?.undo()}
+          onRedo={() => whiteboardRef.current?.redo()}
+          onExit={() => setFocusMode(false)}
+        />
       )}
 
       {isPresenting && (
