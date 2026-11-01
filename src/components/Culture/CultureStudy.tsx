@@ -110,8 +110,8 @@ export const CultureStudy: React.FC = () => {
 
       {/* 보기 방식 · 거르기 · 찾기 */}
       <div className="flex flex-wrap items-center gap-2">
-        <Seg label="보기 방식" value={mode} onChange={setMode} options={[['card', '카드'], ['list', '목록'], ['quiz', '퀴즈']]} />
-        <Seg label="거르기" value={filter} onChange={setFilter} options={[['all', '전체'], ['todo', '아직'], ['known', '외운 것']]} />
+        <Seg<'card' | 'list' | 'quiz'> label="보기 방식" value={mode} onChange={setMode} options={[['card', '카드'], ['list', '목록'], ['quiz', '퀴즈']]} />
+        <Seg<'all' | 'todo' | 'known'> label="거르기" value={filter} onChange={setFilter} options={[['all', '전체'], ['todo', '아직'], ['known', '외운 것']]} />
         {deck === 'saja' && (
           <select value={stage} onChange={e => setStage(Number(e.target.value))} aria-label="난이도" className="h-9 px-3 bg-slate-100 rounded-xl text-[12.5px] font-semibold text-slate-700 outline-none">
             <option value={0}>난이도 전체</option>
@@ -228,7 +228,7 @@ const Quiz: React.FC<{ def: DeckDef; list: any[]; pool: any[]; onKnown: (id: str
   const make = () => {
     const x = list[Math.floor(Math.random() * list.length)];
     const ans = isLaw ? `${x.no} (${x.t})` : def.back(x);
-    const others = shuffleArr(pool.filter(p => p.id !== x.id)).slice(0, 12).map(p => (isLaw ? `${p.no} (${p.t})` : def.back(p))).filter(s => s !== ans);
+    const others = shuffleArr<any>(pool.filter(p => p.id !== x.id)).slice(0, 12).map(p => (isLaw ? `${p.no} (${p.t})` : def.back(p))).filter(s => s !== ans);
     const opts = shuffleArr([ans, ...Array.from(new Set(others)).slice(0, 3)]);
     return { x, ans, opts };
   };
