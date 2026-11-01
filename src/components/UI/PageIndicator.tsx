@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ChevronUp, ChevronDown, Plus } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 
-export interface PageInfo { index: number; total: number; pageNo: number; first: number; last: number; notebook?: boolean }
+export interface PageInfo { index: number; total: number; pageNo: number; first: number; last: number; notebook?: boolean; /** 이 슬라이드에 있는 종이 종류 (쉼표로) */ kinds?: string }
 
 /** 한 슬라이드에 이어 붙인 PDF의 지금 쪽 번호와 쪽 이동 */
 export const PageIndicator: React.FC<{

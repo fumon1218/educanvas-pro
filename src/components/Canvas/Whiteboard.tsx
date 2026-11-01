@@ -13,7 +13,7 @@ import {
 } from '@/src/lib/canvasData';
 import { toast } from 'sonner';
 import { PressureBrush, getPenSettings, notePointer, deviceHasPen, rememberPen } from '@/src/lib/pen';
-import { appendPaper, makeChecklist, type PaperStyle } from '@/src/lib/templates';
+import { appendPaper, churchPlanCells, makeChecklist, type PaperStyle } from '@/src/lib/templates';
 
 export type ToolType =
   | 'pen' | 'eraser' | 'laser' | 'select' | 'lasso' | 'pencil' | 'fountain' | 'ballpoint'
@@ -101,7 +101,9 @@ export interface WhiteboardHandle {
   /** 이어 붙인 PDF 쪽 정보 (없으면 null) */
   /** 양식 칸에 적은 글 (예: 설교 노트 'passage' = 본문) */
   getFieldText: (key: string) => string;
-  getPageInfo: () => { index: number; total: number; pageNo: number; first: number; last: number; notebook?: boolean } | null;
+  getPageInfo: () => { index: number; total: number; pageNo: number; first: number; last: number; notebook?: boolean; kinds?: string } | null;
+  /** 교회 계획 항목을 화면 좌표(clientX, clientY)에 놓는다 */
+  dropPlanItem: (clientX: number, clientY: number, item: { text: string; kind: 'chip' | 'banner'; color: string }) => boolean;
   /** PDF 쪽 번호로 이동 */
   goToPageNo: (n: number) => boolean;
   /** 이 슬라이드의 가림 카드들 */
@@ -1104,7 +1106,8 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       if (!pages.length) return null;
       const i = Math.max(0, currentPageIndex(pages));
       const nos = pages.map(p => (p as any).pageNo as number);
-      return { index: i, total: pages.length, pageNo: nos[i], first: Math.min(...nos), last: Math.max(...nos), notebook };
+      const kinds = [...new Set(pages.map((p: any) => p.notebook).filter(Boolean))].join(',');
+      return { index: i, total: pages.length, pageNo: nos[i], first: Math.min(...nos), last: Math.max(...nos), notebook, kinds };
     },
     appendNotebookPage: async (opts = {}) => {
       const canvas = fabricRef.current;
@@ -1119,6 +1122,43 @@ export const Whiteboard = React.memo(React.forwardRef<WhiteboardHandle, Whiteboa
       if (page) fitRect(page.getBoundingRect());
       commitChange();
       return page?.pageNo ?? n;
+    },
+    dropPlanItem: (clientX, clientY, item) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return false;
+      const rect = canvas.upperCanvasEl.getBoundingClientRect();
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return false;
+      const v = canvas.viewportTransform;
+      const sx = (clientX - rect.left - v[4]) / v[0], sy = (clientY - rect.top - v[5]) / v[3];
+      // 놓은 곳의 교회 계획 종이와 날짜 칸
+      const page: any = canvas.getObjects().find((o: any) => o.notebook === 'churchplan' && o.planMonth && (() => { const r = o.getBoundingRect(); return sx >= r.left && sx <= r.left + r.width && sy >= r.top && sy <= r.top + r.height; })());
+      let left = sx, top = sy - 12, width = 140, k = 1;
+      if (page) {
+        k = page.scaleX || 1;
+        const [yy, mm] = String(page.planMonth).split('-').map(Number);
+        const px = (sx - page.left) / k, py = (sy - page.top) / k;
+        const cells = churchPlanCells(new Date(yy, mm - 1, 1));
+        const cell = cells.find(c => px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h);
+        if (cell) {
+          left = page.left + (cell.x + 6) * k;
+          top = page.top + Math.max(cell.y + 52, Math.min(py - 14, cell.y + cell.h - 30)) * k;
+          width = (item.kind === 'banner' ? Math.min(5, 7 - cells.indexOf(cell) % 7) * cell.w - 12 : cell.w - 12) * k;
+        } else width = (item.kind === 'banner' ? 600 : 140) * k;
+      } else if (item.kind === 'banner') width = 600;
+      const t = new fabric.Textbox(item.text, {
+        left, top, width, originX: 'left', originY: 'top',
+        fontSize: (item.kind === 'banner' ? 34 : 26) * k, fontWeight: 'bold', lineHeight: 1.15,
+        fill: item.kind === 'banner' ? '#0f172a' : item.color, fontFamily: KOREAN_FONT,
+        textAlign: item.kind === 'banner' ? 'center' : 'left',
+        backgroundColor: item.kind === 'banner' ? item.color : '',
+        padding: item.kind === 'banner' ? 6 * k : 0,
+      });
+      Object.assign(t as any, { id: newId(), planItem: item.kind });
+      canvas.add(t);
+      applyToolState();
+      canvas.requestRenderAll();
+      commitChange();
+      return true;
     },
     hasNotebookPages: () => !!fabricRef.current?.getObjects().some(isNotebookPage),
     addChecklist: (kind: 'todo' | 'prayer') => {
