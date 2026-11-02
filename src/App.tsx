@@ -1,6 +1,8 @@
 import { IepWindow } from './components/UI/IepWindow';
 import * as driveSyncMod from './lib/driveSync';
 import { MonthPickerHost, pickMonth } from './components/UI/MonthPicker';
+import { TracePickerHost, pickTrace } from './components/Culture/TracePicker';
+import { buildTraceScene, type TraceOpts } from './lib/culture/trace';
 import { PlanPalette } from './components/UI/PlanPalette';
 import { AddPageHost, pickPage } from './components/UI/AddPagePicker';
 import { getAiKey } from './lib/aiKey';
@@ -785,25 +787,39 @@ export default function App() {
     toast.success('이 기기에서 드라이브 저장을 껐습니다.', { description: '드라이브에 있는 수업은 그대로 남아 있습니다.' });
   }, []);
 
-  const newLesson = useCallback(async (opts: { category?: string; space?: Space; template?: TemplateDef; skipSave?: boolean } = {}) => {
+  const newLesson = useCallback(async (opts: { category?: string; space?: Space; template?: TemplateDef; skipSave?: boolean; trace?: TraceOpts; traceDeck?: string } = {}) => {
     const t = opts.template;
     // 교회 계획은 몇 월 계획인지 고른다
     let planDate: Date | null = null;
     if (isMonthPaper(t?.paper)) { planDate = await pickMonth(t!.label, new Date()); if (!planDate) return; }
+    // 교양 따라 쓰기: 자료·범위를 고른다 (카드 학습에서 바로 오면 고르지 않음)
+    let trace: TraceOpts | null = opts.trace || null;
+    if (t?.trace && !trace) { trace = await pickTrace(opts.traceDeck); if (!trace) return; }
     if (!opts.skipSave && dirtyRef.current) await saveRef.current(false);
     if (!opts.skipSave && driveOnRef.current && driveDirtyRef.current) await saveToDrive({});
     const now = new Date();
     const space = opts.space || t?.space || 'lesson';
     const w = whiteboardRef.current?.getCanvas()?.width || window.innerWidth;
-    const data = t ? await buildTemplateScene(t, w, planDate || now) : null;
-    const first: Scene = { id: newId(), name: t?.paper ? '1쪽' : '슬라이드 1', data, order: 0 };
-    const name = t ? t.name(planDate || now) : '새 수업';
+    let data: string | null = null;
+    let name = t ? t.name(planDate || now) : '새 수업';
+    let traceInfo: { pages: number; cut: number } | null = null;
+    if (trace) {
+      const tid = toast.loading('따라 쓰기 종이를 만드는 중…');
+      try { const r = await buildTraceScene(trace, w); data = r.data; name = r.name; traceInfo = r; }
+      catch (e: any) { toast.error('따라 쓰기 노트를 만들지 못했습니다.', { description: e?.message }); return; }
+      finally { toast.dismiss(tid); }
+    } else if (t) data = await buildTemplateScene(t, w, planDate || now);
+    const paged = !!(t?.paper || trace);
+    const first: Scene = { id: newId(), name: paged ? '1쪽' : '슬라이드 1', data, order: 0 };
     const noteDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     applyProject({ format: 'educanvas-project', version: 1, name, savedAt: now.toISOString(), activeSceneId: first.id, canvasBackground: 'blank', scenes: [{ id: first.id, name: first.name, data }] }, { publish: true });
     lessonRef.current = { lessonId: newId() + newId(), fileId: null, modified: null, category: opts.category, space, noteDate };
     if (data) { markDirty(); setTimeout(() => { whiteboardRef.current?.goToPageNo(1); }, 400); }
     setLessonsOpen(false);
-    toast.success(t?.paper ? `'${name}'을(를) 만들었습니다.` : '새 수업을 시작했습니다.', {
+    if (traceInfo) toast.success(`'${name}'을(를) 만들었습니다. (${traceInfo.pages}쪽)`, {
+      description: `흐린 글씨 위에 펜으로 따라 쓰고, 빈칸에 혼자 써 보세요. 쪽은 PageDown으로 넘깁니다.${traceInfo.cut ? ` 한 노트는 최대 12쪽이라 ${traceInfo.cut}개는 빠졌습니다.` : ''}`,
+    });
+    else toast.success(t?.paper ? `'${name}'을(를) 만들었습니다.` : '새 수업을 시작했습니다.', {
       description: t?.paper ? '칸에 펜으로 바로 쓰거나, 선택 도구로 칸을 두 번 눌러 타자로 적으세요. 쪽이 모자라면 노트 → [공책 쪽 추가].' : `${opts.category ? `'${opts.category}' 분류 · ` : ''}판서를 시작하면 [내 노트]에 자동으로 저장됩니다.`,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2279,6 +2295,7 @@ export default function App() {
       <CalendarHost />
       <AddPageHost />
       <MonthPickerHost />
+      <TracePickerHost />
       <IepWindow open={iepOpen} onClose={() => setIepOpen(false)} onToSlides={iepToSlides} />
       <LessonHistoryModal isOpen={historyOpen} lessonId={historyLesson} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
       <LessonDashboard
