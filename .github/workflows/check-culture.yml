@@ -1,0 +1,49 @@
+name: Check culture branch (temporary)
+on:
+  push:
+    branches: ["claude/culture-space"]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build && npm run build:lite
+      - name: Screenshot
+        continue-on-error: true
+        run: |
+          npx -y playwright@1.49.1 install --with-deps chromium
+          npx vite preview --port 4173 --strictPort &
+          sleep 5
+          cat > shot.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const b = await chromium.launch();
+          const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
+          const errs = [];
+          p.on('pageerror', e => errs.push(String(e)));
+          await p.goto('http://localhost:4173/educanvas-pro/', { waitUntil: 'networkidle' });
+          await p.waitForTimeout(2000);
+          await p.screenshot({ path: 'shots/1-start.png' });
+          const tab = p.getByText('교양', { exact: true }).first();
+          if (await tab.count()) { await tab.click(); await p.waitForTimeout(2500); }
+          await p.screenshot({ path: 'shots/2-culture.png' });
+          console.log('page errors:', JSON.stringify(errs));
+          await b.close();
+          JS
+          mkdir -p shots
+          npm i --no-save playwright@1.49.1
+          node shot.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots
+          path: shots
+          if-no-files-found: ignore
