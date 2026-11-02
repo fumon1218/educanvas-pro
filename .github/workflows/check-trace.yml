@@ -23,6 +23,9 @@ jobs:
           sudo apt-get install -y fonts-noto-cjk >/dev/null 2>&1 || true
           npm i --no-save playwright@1.49.1
           npx playwright install --with-deps chromium
+          # 시험용: 로그인 화면 없이 (이 작업 안에서만)
+          sed -i 's#<AccessGate>#<>#; s#</AccessGate>#</>#' src/main.tsx
+          npx vite build >/dev/null
           npx vite preview --port 4173 --strictPort &
           sleep 5
           mkdir -p shots
@@ -34,7 +37,7 @@ jobs:
           p.on('pageerror', e => errs.push(String(e)));
           let n = 0; const shot = async t => { await p.waitForTimeout(1200); await p.screenshot({ path: `shots/${++n}-${t}.png` }); };
           const step = async (t, fn) => { try { await fn(); } catch (e) { console.log('STEP FAIL', t, String(e).slice(0, 200)); } await shot(t); };
-          await p.goto('http://localhost:4173/educanvas-pro/', { waitUntil: 'networkidle' });
+          await p.goto('http://localhost:4173/educanvas-pro/?test=1', { waitUntil: 'networkidle' });
           await shot('start');
           await p.keyboard.press('Escape');
           await step('notes', () => p.getByRole('button', { name: '내 노트 목록' }).first().click({ timeout: 5000 }));
