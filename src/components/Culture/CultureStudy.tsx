@@ -5,10 +5,11 @@
  *  (Edu-Scheduler Premium '교양 → 학습' 탭을 옮겨 온 것)
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Loader2, RotateCcw, Search, Shuffle, Volume2 } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Loader2, PenLine, RotateCcw, Search, Shuffle, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useKnown, useStudyData, speak, type StudyData, type Voice } from '@/src/lib/culture/studyData';
 import { GRAMMAR_ITEMS } from '@/src/lib/culture/grammar';
+import { TRACE_MAX_PAGES, traceDeckDef, type TraceOpts } from '@/src/lib/culture/trace';
 import { cn } from '@/src/lib/utils';
 
 type DeckId = 'saja' | 'cheonja' | 'hanja' | 'en' | 'grammar' | 'ja' | 'es' | 'esw' | 'law';
@@ -60,7 +61,7 @@ const Seg = <T extends string>({ value, options, onChange, label }: { value: T; 
   </div>
 );
 
-export const CultureStudy: React.FC = () => {
+export const CultureStudy: React.FC<{ /** 따라 쓰기 노트 만들기 */ onTrace?: (o: { trace?: TraceOpts; traceDeck?: string }) => void }> = ({ onTrace }) => {
   const { data, error, retry } = useStudyData();
   const known = useKnown();
   const [deck, setDeckState] = useState<DeckId>(loadDeck);
@@ -124,6 +125,20 @@ export const CultureStudy: React.FC = () => {
             className="w-full h-9 pl-8 pr-3 rounded-xl bg-slate-100 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-indigo-200" />
         </label>
         <span className="text-[12px] text-slate-400 tabular-nums">{list.length}개</span>
+        {onTrace && (
+          <button
+            onClick={() => {
+              // 거르거나 찾은 목록이면 그 항목으로 바로, 아니면 범위를 고른다
+              const narrowed = list.length > 0 && list.length < all.length;
+              const td = traceDeckDef(deck);
+              if (narrowed && td) onTrace({ trace: { deck: td.id, ids: list.slice(0, td.perPage * TRACE_MAX_PAGES).map((x: any) => x.id) } });
+              else onTrace({ traceDeck: deck });
+            }}
+            title={list.length < all.length ? '지금 보이는 목록으로 따라 쓰기 노트를 만듭니다' : '범위를 골라 따라 쓰기 노트를 만듭니다'}
+            className="h-9 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold flex items-center gap-1.5">
+            <PenLine size={15} />따라 쓰기
+          </button>
+        )}
       </div>
 
       {list.length === 0 ? (

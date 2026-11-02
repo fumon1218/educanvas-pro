@@ -11,7 +11,8 @@ import {
   listLibrary, updateLesson, deleteLessonForever, duplicateLesson, renameCategory, setCategories, spaceOf, SPACES,
   type LibraryEntry, type Space,
 } from '@/src/lib/projectStore';
-import { templatesFor, type TemplateDef } from '@/src/lib/templates';
+import { templatesFor, TRACE_TEMPLATE, type TemplateDef } from '@/src/lib/templates';
+import type { TraceOpts } from '@/src/lib/culture/trace';
 import type { CheckItem } from '@/src/lib/noteOps';
 import type { DriveLesson } from '@/src/lib/driveSync';
 import { TEST_MODE } from '@/src/lib/testMode';
@@ -53,7 +54,7 @@ export interface LessonDashboardProps {
   /** 지금 수업을 먼저 저장 (목록을 열 때 최신으로) */
   saveCurrent: () => Promise<void>;
   onOpen: (id: string) => void;
-  onNew: (opts: { category?: string; space: Space; template: TemplateDef }) => void;
+  onNew: (opts: { category?: string; space: Space; template: TemplateDef; trace?: TraceOpts; traceDeck?: string }) => void;
   /** 이 양식을 새 노트 대신 지금 노트에 쪽으로 더하기 */
   onAddAsPage?: (template: TemplateDef) => void;
   /** 개별화교육계획 작성 도구 열기 */
@@ -353,7 +354,7 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
                   </div>
                 )}
                 {!k && view.kind === 'cards' ? (
-                  <CultureStudy />
+                  <CultureStudy onTrace={o => props.onNew({ space: 'culture', template: TRACE_TEMPLATE, ...o })} />
                 ) : !k && view.kind === 'drive' ? (
                   <DrivePane drive={drive} list={driveList} err={driveErr} reload={loadDrive} localIds={localIds} onClose={onClose} />
                 ) : !k && view.kind === 'calendar' ? (
