@@ -4,7 +4,9 @@ import {
   X, Search, Plus, Star, Folder, FolderPlus, Trash2, Clock, LayoutGrid, Cloud, CloudOff, HardDrive, MoreHorizontal,
   Copy, Pencil, History, RotateCcw, FileUp, Check, Loader2, Tag, ArrowDownAZ, CalendarClock, CalendarDays, ListChecks,
   HeartHandshake, Lock, LockOpen, FileDown, Presentation, GraduationCap, BookOpen, Briefcase, ChevronLeft, ChevronRight, ArrowRightLeft, BookmarkPlus, ClipboardList,
+  Library, Layers,
 } from 'lucide-react';
+import { CultureStudy } from '@/src/components/Culture/CultureStudy';
 import {
   listLibrary, updateLesson, deleteLessonForever, duplicateLesson, renameCategory, setCategories, spaceOf, SPACES,
   type LibraryEntry, type Space,
@@ -17,10 +19,12 @@ import { cn } from '@/src/lib/utils';
 
 type View =
   | { kind: 'all' } | { kind: 'fav' } | { kind: 'recent' } | { kind: 'cat'; name: string } | { kind: 'none' }
-  | { kind: 'trash' } | { kind: 'drive' } | { kind: 'calendar' } | { kind: 'checks'; check: 'todo' | 'prayer' };
+  | { kind: 'trash' } | { kind: 'drive' } | { kind: 'calendar' } | { kind: 'checks'; check: 'todo' | 'prayer' } | { kind: 'cards' };
 
-const SPACE_ICON: Record<Space, React.ElementType> = { lesson: Presentation, student: GraduationCap, sermon: BookOpen, work: Briefcase, iep: ClipboardList };
-const SPACE_TINT: Record<Space, string> = { lesson: 'text-indigo-600', student: 'text-emerald-600', sermon: 'text-amber-600', work: 'text-sky-600', iep: 'text-teal-600' };
+const SPACE_ICON: Record<Space, React.ElementType> = { lesson: Presentation, student: GraduationCap, sermon: BookOpen, work: Briefcase, iep: ClipboardList, culture: Library };
+const SPACE_TINT: Record<Space, string> = { lesson: 'text-indigo-600', student: 'text-emerald-600', sermon: 'text-amber-600', work: 'text-sky-600', iep: 'text-teal-600', culture: 'text-rose-600' };
+/** 공간을 열 때 처음 보이는 화면 (교양은 카드 학습부터) */
+const firstView = (s: Space): View => (s === 'culture' ? { kind: 'cards' } : { kind: 'all' });
 
 const when = (iso: string) => {
   const d = new Date(iso), s = (Date.now() - d.getTime()) / 1000;
@@ -79,7 +83,7 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
   const [lessons, setLessons] = useState<LibraryEntry[] | null>(null);
   const [cats, setCats] = useState<string[]>([]);
   const [space, setSpaceState] = useState<Space>(() => loadSpace(props.defaultSpace || 'lesson'));
-  const [view, setView] = useState<View>({ kind: 'all' });
+  const [view, setView] = useState<View>(() => firstView(space));
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<'recent' | 'name'>('recent');
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -95,7 +99,7 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
   const [checks, setChecks] = useState<CheckItem[] | null>(null);
   const [showDone, setShowDone] = useState(false);
 
-  const setSpace = (s: Space) => { setSpaceState(s); setView({ kind: 'all' }); try { localStorage.setItem(SPACE_KEY, s); } catch { /* 무시 */ } };
+  const setSpace = (s: Space) => { setSpaceState(s); setView(firstView(s)); try { localStorage.setItem(SPACE_KEY, s); } catch { /* 무시 */ } };
 
   const refresh = useCallback(async () => {
     const lib = await listLibrary();
@@ -205,7 +209,7 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
   const title = k ? `'${q.trim()}' 찾기 (모든 공간)` :
     view.kind === 'all' ? `${spaceLabel} · 전체` : view.kind === 'fav' ? '즐겨찾기' : view.kind === 'recent' ? '최근 7일' :
     view.kind === 'cat' ? view.name : view.kind === 'none' ? '분류 없음' : view.kind === 'trash' ? '휴지통' : view.kind === 'calendar' ? '달력' :
-    view.kind === 'checks' ? (view.check === 'todo' ? '할 일 모아 보기' : '기도 제목 모아 보기') : '구글 드라이브';
+    view.kind === 'checks' ? (view.check === 'todo' ? '할 일 모아 보기' : '기도 제목 모아 보기') : view.kind === 'cards' ? '카드 학습' : '구글 드라이브';
 
   const NavBtn: React.FC<{ v: View; icon: React.ElementType; label: string; n?: number }> = ({ v, icon: Icon, label, n }) => {
     const on = view.kind === v.kind && (v.kind !== 'cat' || (view.kind === 'cat' && view.name === (v as any).name)) && (v.kind !== 'checks' || (view.kind === 'checks' && view.check === (v as any).check));
@@ -217,7 +221,7 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
   };
 
   const localIds = new Set(all.map(l => l.id));
-  const gridView = !k ? !['drive', 'calendar', 'checks'].includes(view.kind) : true;
+  const gridView = !k ? !['drive', 'calendar', 'checks', 'cards'].includes(view.kind) : true;
 
   return (
     <AnimatePresence>
@@ -237,20 +241,21 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
                 <button onClick={onClose} className="md:hidden p-2 text-slate-400 hover:bg-slate-100 rounded-full" aria-label="닫기"><X size={20} /></button>
               </div>
               {/* 공간 */}
-              <div className="px-3 pb-2 grid grid-flow-col auto-cols-fr gap-1" role="tablist" aria-label="공간">
+              <div className="px-3 pb-2 grid grid-flow-col auto-cols-fr md:grid-flow-row md:grid-cols-3 gap-1" role="tablist" aria-label="공간">
                 {SPACES.map(s => {
                   const Icon = SPACE_ICON[s.id];
                   const n = all.filter(l => !l.trashedAt && spaceOf(l) === s.id).length;
                   return (
                     <button key={s.id} role="tab" aria-selected={space === s.id} onClick={() => { setSpace(s.id); setQ(''); }}
-                      className={cn('h-14 min-w-0 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[12px] font-semibold whitespace-nowrap tracking-tight', space === s.id ? 'bg-white shadow-sm ring-1 ring-slate-200 text-slate-900' : 'text-slate-500 hover:bg-white/70')}>
-                      <Icon size={17} className={space === s.id ? SPACE_TINT[s.id] : ''} />{s.label}<span className="text-[10.5px] font-normal text-slate-400 -mt-0.5">{n}</span>
+                      className={cn('h-14 [@media(max-height:560px)]:h-10 min-w-0 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[12px] font-semibold whitespace-nowrap tracking-tight', space === s.id ? 'bg-white shadow-sm ring-1 ring-slate-200 text-slate-900' : 'text-slate-500 hover:bg-white/70')}>
+                      <Icon size={17} className={space === s.id ? SPACE_TINT[s.id] : ''} />{s.label}<span className="text-[10.5px] font-normal text-slate-400 -mt-0.5 [@media(max-height:560px)]:hidden">{n}</span>
                     </button>
                   );
                 })}
               </div>
               <nav className="flex md:flex-col gap-1 px-2 md:px-3 py-1 overflow-x-auto md:overflow-y-auto md:flex-1">
-                <NavBtn v={{ kind: 'all' }} icon={LayoutGrid} label="전체" n={live.length} />
+                {space === 'culture' && <NavBtn v={{ kind: 'cards' }} icon={Layers} label="카드 학습" />}
+                <NavBtn v={{ kind: 'all' }} icon={LayoutGrid} label={space === 'culture' ? '교양 노트' : '전체'} n={live.length} />
                 <NavBtn v={{ kind: 'fav' }} icon={Star} label="즐겨찾기" n={count(l => !!l.favorite)} />
                 <NavBtn v={{ kind: 'recent' }} icon={Clock} label="최근 7일" />
                 <NavBtn v={{ kind: 'calendar' }} icon={CalendarDays} label="달력" />
@@ -347,7 +352,9 @@ export const LessonDashboard: React.FC<LessonDashboardProps> = (props) => {
                     <button onClick={props.onOpenIep} className="h-10 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[14px] font-semibold">작성 도구 열기</button>
                   </div>
                 )}
-                {!k && view.kind === 'drive' ? (
+                {!k && view.kind === 'cards' ? (
+                  <CultureStudy />
+                ) : !k && view.kind === 'drive' ? (
                   <DrivePane drive={drive} list={driveList} err={driveErr} reload={loadDrive} localIds={localIds} onClose={onClose} />
                 ) : !k && view.kind === 'calendar' ? (
                   <CalendarPane month={month} setMonth={setMonth} lessons={live} currentId={currentLessonId} onOpen={id => (id === currentLessonId ? onClose() : props.onOpen(id))} />

@@ -4,6 +4,7 @@
  *  학생: 스터디 플래너 · 코넬 공부 노트 · 줄 공책 (+ 오답 노트)
  *  설교: 설교 노트 (날짜·설교자·본문·제목 / 대지 1·2·3 / 적용 / 기도 제목)
  *  업무: 회의록 (일시·장소·참석자·안건 / 논의 / 결정 사항 / 할 일) · 업무 일지
+ *  교양: 필사 노트 · 한자 쓰기 (+ 카드 학습)
  *
  * 양식은 '종이'(잠긴 배경 그림, 세로로 이어 붙임) + 타자로 채우는 칸(글상자) + 체크 목록으로 만든다.
  * 종이는 쪽 번호(pageNo)를 달아 PDF처럼 PageDown·쪽 번호로 넘기고, [+ 쪽]으로 늘린다.
@@ -37,6 +38,8 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'lined', space: 'iep', label: '관찰·상담 기록', desc: '학생 관찰·상담·진전 기록용 줄 공책', paper: 'lined', name: d => `관찰 기록 · ${md(d)}` },
   { id: 'grid', space: 'iep', label: '모눈 공책', desc: '학습지·자료 만들기', paper: 'grid', name: d => `개별화 자료 · ${md(d)}` },
   { id: 'lined', space: 'work', label: '줄 공책', desc: '자유 메모', paper: 'lined', name: d => `업무 메모 · ${md(d)}` },
+  { id: 'lined', space: 'culture', label: '필사 노트', desc: '마음에 남는 문장·시를 옮겨 적는 줄 공책', paper: 'lined', name: d => `필사 노트 · ${md(d)}` },
+  { id: 'grid', space: 'culture', label: '한자 쓰기', desc: '천자문·사자성어·한자 따라 쓰기용 모눈 공책', paper: 'grid', name: d => `한자 쓰기 · ${md(d)}` },
 ];
 export const templatesFor = (space: Space) => TEMPLATES.filter(t => t.space === space && !(LITE && t.space === 'sermon'));
 
